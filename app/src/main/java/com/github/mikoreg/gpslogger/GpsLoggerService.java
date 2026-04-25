@@ -8,14 +8,12 @@ import android.app.Service;
 import android.bluetooth.BluetoothAdapter;
 import android.content.Context;
 import android.content.Intent;
-import android.content.pm.ServiceInfo;
 import android.media.AudioAttributes;
 import android.media.RingtoneManager;
 import android.net.Uri;
 import android.os.Binder;
 import android.os.Build;
 import android.os.IBinder;
-import android.os.VibrationEffect;
 import android.os.Vibrator;
 
 import org.jspecify.annotations.Nullable;
@@ -154,8 +152,10 @@ public final class GpsLoggerService extends Service {
 
     private void startInForeground() {
         Notification notification = buildForegroundNotification("GPS Logger Running", "Initializing...", R.drawable.ic_stat_gps_waiting);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE);
+        if (Build.VERSION.SDK_INT >= 29) {
+            // Using literal value 0x00000010 for FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE 
+            // to avoid verification issues on Android 5
+            startForeground(NOTIFICATION_ID, notification, 0x00000010);
         } else {
             startForeground(NOTIFICATION_ID, notification);
         }
@@ -182,17 +182,13 @@ public final class GpsLoggerService extends Service {
     private void triggerVibration() {
         Vibrator v = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
         if (v != null) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                v.vibrate(VibrationEffect.createOneShot(1000, VibrationEffect.DEFAULT_AMPLITUDE));
-            } else {
-                v.vibrate(1000);
-            }
+            v.vibrate(1000);
         }
     }
 
     private Notification buildForegroundNotification(String title, String text, int iconRes) {
         PendingIntent pendingIntent = createContentIntent();
-        Notification.Builder builder = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+        Notification.Builder builder = Build.VERSION.SDK_INT >= 26
                 ? new Notification.Builder(this, CHANNEL_ID_LOW)
                 : new Notification.Builder(this);
 
@@ -207,7 +203,7 @@ public final class GpsLoggerService extends Service {
 
     private void showHighPriorityNotification(String title, String text) {
         PendingIntent pendingIntent = createContentIntent();
-        Notification.Builder builder = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+        Notification.Builder builder = Build.VERSION.SDK_INT >= 26
                 ? new Notification.Builder(this, CHANNEL_ID_HIGH)
                 : new Notification.Builder(this).setPriority(Notification.PRIORITY_HIGH);
 
@@ -233,14 +229,14 @@ public final class GpsLoggerService extends Service {
         Intent intent = new Intent(this, MainActivity.class);
         intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
         int flags = PendingIntent.FLAG_UPDATE_CURRENT;
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            flags |= PendingIntent.FLAG_IMMUTABLE;
+        if (Build.VERSION.SDK_INT >= 23) {
+            flags |= 0x04000000; // PendingIntent.FLAG_IMMUTABLE
         }
         return PendingIntent.getActivity(this, 0, intent, flags);
     }
 
     private void createNotificationChannels() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+        if (Build.VERSION.SDK_INT < 26) {
             return;
         }
         NotificationManager manager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
@@ -266,7 +262,7 @@ public final class GpsLoggerService extends Service {
     }
 
     private void stopForegroundCompat() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+        if (Build.VERSION.SDK_INT >= 24) {
             stopForeground(STOP_FOREGROUND_REMOVE);
         } else {
             stopForeground(true);

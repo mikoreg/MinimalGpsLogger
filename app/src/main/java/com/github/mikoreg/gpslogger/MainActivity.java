@@ -30,6 +30,9 @@ import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import androidx.core.app.ActivityCompat;
+import androidx.core.content.ContextCompat;
+
 import org.jspecify.annotations.Nullable;
 
 import java.io.File;
@@ -38,12 +41,11 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.channels.FileChannel;
 import java.util.ArrayList;
+import java.util.List;
 import java.util.Set;
 
 public final class MainActivity extends Activity {
-    private static final int REQUEST_BLUETOOTH_CONNECT = 1001;
-    private static final int REQUEST_POST_NOTIFICATIONS = 1002;
-    private static final int REQUEST_STORAGE = 1003;
+    private static final int REQUEST_ALL = 1000;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
 
@@ -80,7 +82,6 @@ public final class MainActivity extends Activity {
             boundService = binder.service();
             refreshStatsUi();
         }
-
         @Override
         public void onServiceDisconnected(ComponentName name) {
             boundService = null;
@@ -92,7 +93,9 @@ public final class MainActivity extends Activity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
         initViews();
-        requestRuntimePermissionsIfNeeded();
+        if (Build.VERSION.SDK_INT >= 23) {
+            requestRuntimePermissionsIfNeeded();
+        }
         refreshBondedDevices();
     }
 
@@ -109,7 +112,7 @@ public final class MainActivity extends Activity {
         openMapBtn = findViewById(R.id.openMapBtn);
 
         deviceSpinner = findViewById(R.id.deviceSpinner);
-        deviceAdapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, new ArrayList<>());
+        deviceAdapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, new ArrayList<DeviceListItem>());
         deviceAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
         if (deviceSpinner != null) deviceSpinner.setAdapter(deviceAdapter);
 
@@ -121,7 +124,6 @@ public final class MainActivity extends Activity {
         if (exportGpxBtn != null) exportGpxBtn.setOnClickListener(v -> exportToGpxWithNotification());
         
         permissionText = findViewById(R.id.permissionText);
-        
         updateStatsUi(NmeaStats.idle());
     }
 
@@ -151,24 +153,27 @@ public final class MainActivity extends Activity {
     }
 
     private void requestRuntimePermissionsIfNeeded() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
-                && checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(new String[]{Manifest.permission.BLUETOOTH_CONNECT}, REQUEST_BLUETOOTH_CONNECT);
+        if (Build.VERSION.SDK_INT < 23) return;
+
+        List<String> toRequest = new ArrayList<>();
+        if (Build.VERSION.SDK_INT >= 31 && ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
+            toRequest.add(Manifest.permission.BLUETOOTH_CONNECT);
         }
-        if (Build.VERSION.SDK_INT >= 33
-                && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, REQUEST_POST_NOTIFICATIONS);
+        if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            toRequest.add(Manifest.permission.POST_NOTIFICATIONS);
         }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && Build.VERSION.SDK_INT <= 28) {
-            if (checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
-                requestPermissions(new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE}, REQUEST_STORAGE);
-            }
+        if (Build.VERSION.SDK_INT <= 28 && ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+            toRequest.add(Manifest.permission.WRITE_EXTERNAL_STORAGE);
+        }
+        
+        if (!toRequest.isEmpty()) {
+            ActivityCompat.requestPermissions(this, toRequest.toArray(new String[0]), REQUEST_ALL);
         }
     }
 
     private boolean hasBluetoothConnectPermission() {
-        return Build.VERSION.SDK_INT < Build.VERSION_CODES.S
-                || checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED;
+        if (Build.VERSION.SDK_INT < 31) return true;
+        return ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED;
     }
 
     private void refreshPermissionText() {
@@ -203,7 +208,7 @@ public final class MainActivity extends Activity {
             }
             deviceAdapter.notifyDataSetChanged();
         } catch (SecurityException ex) {
-            toast("SecurityException accessing devices.");
+            toast("Permission issue accessing devices.");
         }
     }
 
@@ -221,7 +226,7 @@ public final class MainActivity extends Activity {
         intent.setAction(GpsLoggerService.ACTION_START);
         intent.putExtra(GpsLoggerService.EXTRA_DEVICE_ADDRESS, item.address());
         intent.putExtra(GpsLoggerService.EXTRA_DEVICE_NAME, item.name());
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        if (Build.VERSION.SDK_INT >= 26) {
             startForegroundService(intent);
         } else {
             startService(intent);
@@ -273,13 +278,10 @@ public final class MainActivity extends Activity {
         sb1.setSpan(new ForegroundColorSpan(stateColor), 0, sb1.length(), 0);
         sb1.setSpan(new StyleSpan(Typeface.BOLD), 0, sb1.length(), 0);
         
-        // Timeout Countdown logic
         if (isWorking) {
             long now = SystemClock.elapsedRealtime();
             long lastData = stats.lastDataRealtimeMs();
             long lastFix = stats.lastPositionRealtimeMs();
-            
-            // Check Data Timeout
             if (lastData > 0) {
                 long diffMs = now - lastData;
                 if (diffMs > 2000) {
@@ -287,18 +289,15 @@ public final class MainActivity extends Activity {
                     sb1.append(" (DATA PANIC IN ").append(String.valueOf(remainingSec)).append("s!)");
                 }
             }
-            
-            // Check Fix Timeout (if we have data but no fix for long time)
-            if (lastData > 0 && (now - lastData < 5000)) { // Only if data is flowing
+            if (lastData > 0 && (now - lastData < 5000)) {
                 if (lastFix > 0) {
                     long fixDiffMs = now - lastFix;
-                    if (fixDiffMs > 10000) { // Show warning after 10s no fix
+                    if (fixDiffMs > 10000) {
                         long remainingFix = Math.max(0, 30 - (fixDiffMs / 1000));
                         sb1.append(" (FIX PANIC IN ").append(String.valueOf(remainingFix)).append("s!)");
                     }
                 } else {
-                    // Never had a fix
-                    long sinceStart = now - lastData; // Approx
+                    long sinceStart = now - lastData;
                     if (sinceStart > 30000) {
                          long remainingFirstFix = Math.max(0, 60 - (sinceStart / 1000));
                          sb1.append(" (NO FIX PANIC IN ").append(String.valueOf(remainingFirstFix)).append("s!)");
