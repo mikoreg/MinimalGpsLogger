@@ -1,9 +1,18 @@
 package com.github.mikoreg.gpslogger;
 
+/**
+ * Lightweight NMEA sentence parser.
+ * This class extracts basic GPS statistics (position, speed, satellites) 
+ * from raw NMEA byte arrays without using expensive String operations or Regex.
+ */
 final class NmeaParser {
     private NmeaParser() {
     }
 
+    /**
+     * Parses a single NMEA line and updates the provided stats object.
+     * Validates checksum before parsing.
+     */
     static void parseForStats(byte[] line, int length, MutableNmeaStats stats) {
         if (length < 6 || line[0] != '$') {
             stats.incrementParseErrors();
