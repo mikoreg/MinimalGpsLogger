@@ -162,6 +162,9 @@ public final class MainActivity extends Activity {
         if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             toRequest.add(Manifest.permission.POST_NOTIFICATIONS);
         }
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            toRequest.add(Manifest.permission.ACCESS_FINE_LOCATION);
+        }
         if (Build.VERSION.SDK_INT <= 28 && ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
             toRequest.add(Manifest.permission.WRITE_EXTERNAL_STORAGE);
         }
@@ -171,18 +174,24 @@ public final class MainActivity extends Activity {
         }
     }
 
-    private boolean hasBluetoothConnectPermission() {
-        if (Build.VERSION.SDK_INT < 31) return true;
-        return ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED;
+    private boolean hasRequiredPermissions() {
+        if (Build.VERSION.SDK_INT < 23) return true;
+        
+        boolean locationOk = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED;
+        boolean btOk = true;
+        if (Build.VERSION.SDK_INT >= 31) {
+            btOk = ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED;
+        }
+        return locationOk && btOk;
     }
 
     private void refreshPermissionText() {
         if (permissionText == null) return;
-        if (hasBluetoothConnectPermission()) {
-            permissionText.setText("BT Permission: OK");
+        if (hasRequiredPermissions()) {
+            permissionText.setText("Permissions: OK");
             permissionText.setTextColor(0xFF888888);
         } else {
-            permissionText.setText("Missing BLUETOOTH_CONNECT permission!");
+            permissionText.setText("Missing Permissions (Location/BT)!");
             permissionText.setTextColor(0xFFFF0000);
         }
     }
@@ -190,42 +199,53 @@ public final class MainActivity extends Activity {
     private void refreshBondedDevices() {
         if (deviceAdapter == null) return;
         deviceAdapter.clear();
-        if (!hasBluetoothConnectPermission()) {
-            refreshPermissionText();
-            return;
-        }
-        BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
-        if (adapter == null) {
-            toast("No Bluetooth adapter.");
-            return;
-        }
-        if (!adapter.isEnabled()) toast("Bluetooth is OFF.");
-        try {
-            Set<BluetoothDevice> bonded = adapter.getBondedDevices();
-            for (BluetoothDevice device : bonded) {
-                String name = device.getName();
-                deviceAdapter.add(new DeviceListItem(name == null ? "Unknown" : name, device.getAddress()));
+
+        // Standard Options for this branch
+        deviceAdapter.add(new DeviceListItem("INTERNAL GPS (Built-in Chip)", GpsLoggerService.SOURCE_INTERNAL));
+
+        if (Build.VERSION.SDK_INT >= 31 && ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
+            // Wait for permission
+        } else {
+            BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
+            if (adapter != null && adapter.isEnabled()) {
+                try {
+                    Set<BluetoothDevice> bonded = adapter.getBondedDevices();
+                    for (BluetoothDevice device : bonded) {
+                        String name = device.getName();
+                        deviceAdapter.add(new DeviceListItem("BT: " + (name == null ? "Unknown" : name), device.getAddress()));
+                    }
+                } catch (SecurityException ignored) {}
             }
-            deviceAdapter.notifyDataSetChanged();
-        } catch (SecurityException ex) {
-            toast("Permission issue accessing devices.");
         }
+        deviceAdapter.notifyDataSetChanged();
+        refreshPermissionText();
     }
 
     private void startLogging() {
-        if (!hasBluetoothConnectPermission()) {
-            requestRuntimePermissionsIfNeeded();
+        if (!hasRequiredPermissions()) {
+            if (Build.VERSION.SDK_INT >= 23) {
+                requestRuntimePermissionsIfNeeded();
+            }
             return;
         }
+
         if (deviceSpinner == null || deviceSpinner.getSelectedItem() == null) {
-            toast("Select a GPS device first.");
+            toast("Select a GPS source first.");
             return;
         }
+
         DeviceListItem item = (DeviceListItem) deviceSpinner.getSelectedItem();
         Intent intent = new Intent(this, GpsLoggerService.class);
         intent.setAction(GpsLoggerService.ACTION_START);
-        intent.putExtra(GpsLoggerService.EXTRA_DEVICE_ADDRESS, item.address());
-        intent.putExtra(GpsLoggerService.EXTRA_DEVICE_NAME, item.name());
+        
+        if (GpsLoggerService.SOURCE_INTERNAL.equals(item.address())) {
+            intent.putExtra(GpsLoggerService.EXTRA_SOURCE_TYPE, GpsLoggerService.SOURCE_INTERNAL);
+        } else {
+            intent.putExtra(GpsLoggerService.EXTRA_SOURCE_TYPE, GpsLoggerService.SOURCE_BLUETOOTH);
+            intent.putExtra(GpsLoggerService.EXTRA_DEVICE_ADDRESS, item.address());
+            intent.putExtra(GpsLoggerService.EXTRA_DEVICE_NAME, item.name());
+        }
+
         if (Build.VERSION.SDK_INT >= 26) {
             startForegroundService(intent);
         } else {
@@ -416,6 +436,6 @@ public final class MainActivity extends Activity {
         DeviceListItem(String name, String address) { this.name = name; this.address = address; }
         String name() { return name; }
         String address() { return address; }
-        @Override public String toString() { return name + " (" + address + ")"; }
+        @Override public String toString() { return name; }
     }
 }

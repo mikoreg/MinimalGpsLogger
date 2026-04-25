@@ -23,6 +23,10 @@ public final class GpsLoggerService extends Service {
     public static final String ACTION_STOP = "com.github.mikoreg.gpslogger.action.STOP";
     public static final String EXTRA_DEVICE_ADDRESS = "com.github.mikoreg.gpslogger.extra.DEVICE_ADDRESS";
     public static final String EXTRA_DEVICE_NAME = "com.github.mikoreg.gpslogger.extra.DEVICE_NAME";
+    public static final String EXTRA_SOURCE_TYPE = "com.github.mikoreg.gpslogger.extra.SOURCE_TYPE";
+
+    public static final String SOURCE_BLUETOOTH = "BT";
+    public static final String SOURCE_INTERNAL = "INTERNAL";
 
     private static final String CHANNEL_ID_LOW = "gps_logger_channel_low";
     private static final String CHANNEL_ID_HIGH = "gps_logger_channel_high";
@@ -31,7 +35,7 @@ public final class GpsLoggerService extends Service {
 
     private final LocalBinder binder = new LocalBinder();
     private volatile NmeaStats stats = NmeaStats.idle();
-    private volatile @Nullable NmeaLoggerEngine engine;
+    private volatile @Nullable Runnable engine;
     private volatile @Nullable Thread engineThread;
 
     public final class LocalBinder extends Binder {
@@ -50,17 +54,14 @@ public final class GpsLoggerService extends Service {
     public int onStartCommand(@Nullable Intent intent, int flags, int startId) {
         String action = intent == null ? null : intent.getAction();
         if (ACTION_START.equals(action)) {
+            String type = intent.getStringExtra(EXTRA_SOURCE_TYPE);
+            if (type == null) type = SOURCE_BLUETOOTH;
+
             String address = intent.getStringExtra(EXTRA_DEVICE_ADDRESS);
             String name = intent.getStringExtra(EXTRA_DEVICE_NAME);
-            if (address == null || address.isEmpty()) {
-                stats = NmeaStats.error("Missing Bluetooth MAC address.");
-                return START_NOT_STICKY;
-            }
-            if (name == null || name.isEmpty()) {
-                name = address;
-            }
-            startInForeground();
-            startEngine(address, name);
+
+            startInForeground(type);
+            startEngine(type, address, name);
             return START_STICKY;
         }
 
@@ -87,37 +88,34 @@ public final class GpsLoggerService extends Service {
         return stats;
     }
 
-    private void startEngine(String address, String deviceName) {
+    private void startEngine(String type, @Nullable String address, @Nullable String name) {
         stopEngineOnly();
+        
+        NmeaLoggerEngine.StatsSink sink = new NmeaLoggerEngine.StatsSink() {
+            @Override public void onStats(NmeaStats newStats) {
+                stats = newStats;
+                updateForegroundNotification();
+            }
+            @Override public void onCriticalError(String message) {
+                GpsLoggerService.this.onCriticalError(message);
+            }
+        };
 
-        BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
-        if (adapter == null) {
-            stats = NmeaStats.error("No Bluetooth adapter found.");
-            onCriticalError("Hardware error: No Bluetooth");
-            stopForegroundCompat();
-            stopSelf();
-            return;
+        Runnable newEngine;
+        if (SOURCE_INTERNAL.equals(type)) {
+            newEngine = new InternalNmeaEngine(this, sink);
+        } else {
+            BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
+            if (adapter == null || address == null) {
+                onCriticalError("BT error or no address");
+                stopForegroundCompat();
+                stopSelf();
+                return;
+            }
+            newEngine = new NmeaLoggerEngine(this, adapter, address, name != null ? name : address, sink);
         }
 
-        NmeaLoggerEngine newEngine = new NmeaLoggerEngine(
-                this,
-                adapter,
-                address,
-                deviceName,
-                new NmeaLoggerEngine.StatsSink() {
-                    @Override
-                    public void onStats(NmeaStats newStats) {
-                        stats = newStats;
-                        updateForegroundNotification();
-                    }
-
-                    @Override
-                    public void onCriticalError(String message) {
-                        GpsLoggerService.this.onCriticalError(message);
-                    }
-                }
-        );
-        Thread newThread = new Thread(newEngine, "gps-nmea-logger");
+        Thread newThread = new Thread(newEngine, "gps-logger-" + type);
         engine = newEngine;
         engineThread = newThread;
         newThread.start();
@@ -134,28 +132,27 @@ public final class GpsLoggerService extends Service {
     }
 
     private void stopEngineOnly() {
-        NmeaLoggerEngine currentEngine = engine;
-        if (currentEngine != null) {
-            currentEngine.stop();
-        }
+        Object current = engine;
+        if (current instanceof NmeaLoggerEngine) ((NmeaLoggerEngine)current).stop();
+        else if (current instanceof InternalNmeaEngine) ((InternalNmeaEngine)current).stop();
+
         Thread currentThread = engineThread;
         if (currentThread != null && currentThread != Thread.currentThread()) {
-            try {
-                currentThread.join(1500L);
-            } catch (InterruptedException ex) {
-                Thread.currentThread().interrupt();
-            }
+            try { currentThread.join(1500L); } catch (InterruptedException ex) { Thread.currentThread().interrupt(); }
         }
         engine = null;
         engineThread = null;
     }
 
-    private void startInForeground() {
+    private void startInForeground(String type) {
         Notification notification = buildForegroundNotification("GPS Logger Running", "Initializing...", R.drawable.ic_stat_gps_waiting);
+        
         if (Build.VERSION.SDK_INT >= 29) {
-            // Using literal value 0x00000010 for FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE 
-            // to avoid verification issues on Android 5
-            startForeground(NOTIFICATION_ID, notification, 0x00000010);
+            int typeLocation = 0x00000008; // ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
+            int typeConnected = 0x00000010; // ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
+            
+            int foregroundType = SOURCE_INTERNAL.equals(type) ? typeLocation : typeConnected;
+            startForeground(NOTIFICATION_ID, notification, foregroundType);
         } else {
             startForeground(NOTIFICATION_ID, notification);
         }
@@ -182,7 +179,12 @@ public final class GpsLoggerService extends Service {
     private void triggerVibration() {
         Vibrator v = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
         if (v != null) {
-            v.vibrate(1000);
+            if (Build.VERSION.SDK_INT >= 26) {
+                // v.vibrate(VibrationEffect...) would go here if we wanted, but keeping it simple for API 21
+                v.vibrate(1000);
+            } else {
+                v.vibrate(1000);
+            }
         }
     }
 
@@ -192,13 +194,8 @@ public final class GpsLoggerService extends Service {
                 ? new Notification.Builder(this, CHANNEL_ID_LOW)
                 : new Notification.Builder(this);
 
-        return builder
-                .setContentTitle(title)
-                .setContentText(text)
-                .setSmallIcon(iconRes)
-                .setContentIntent(pendingIntent)
-                .setOngoing(true)
-                .build();
+        return builder.setContentTitle(title).setContentText(text).setSmallIcon(iconRes)
+                .setContentIntent(pendingIntent).setOngoing(true).build();
     }
 
     private void showHighPriorityNotification(String title, String text) {
@@ -210,35 +207,24 @@ public final class GpsLoggerService extends Service {
         Uri alarmSound = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM);
         if (alarmSound == null) alarmSound = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION);
 
-        Notification notification = builder
-                .setContentTitle(title)
-                .setContentText(text)
-                .setSmallIcon(R.drawable.ic_stat_gps_waiting)
-                .setContentIntent(pendingIntent)
-                .setAutoCancel(true)
-                .setSound(alarmSound)
-                .build();
+        Notification notification = builder.setContentTitle(title).setContentText(text)
+                .setSmallIcon(R.drawable.ic_stat_gps_waiting).setContentIntent(pendingIntent)
+                .setAutoCancel(true).setSound(alarmSound).build();
 
         NotificationManager manager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
-        if (manager != null) {
-            manager.notify(ALERT_NOTIFICATION_ID, notification);
-        }
+        if (manager != null) manager.notify(ALERT_NOTIFICATION_ID, notification);
     }
 
     private PendingIntent createContentIntent() {
         Intent intent = new Intent(this, MainActivity.class);
         intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
         int flags = PendingIntent.FLAG_UPDATE_CURRENT;
-        if (Build.VERSION.SDK_INT >= 23) {
-            flags |= 0x04000000; // PendingIntent.FLAG_IMMUTABLE
-        }
+        if (Build.VERSION.SDK_INT >= 23) flags |= 0x04000000; // PendingIntent.FLAG_IMMUTABLE
         return PendingIntent.getActivity(this, 0, intent, flags);
     }
 
     private void createNotificationChannels() {
-        if (Build.VERSION.SDK_INT < 26) {
-            return;
-        }
+        if (Build.VERSION.SDK_INT < 26) return;
         NotificationManager manager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
         if (manager == null) return;
 
@@ -255,17 +241,13 @@ public final class GpsLoggerService extends Service {
         
         high.setSound(alarmSound, new AudioAttributes.Builder()
                 .setUsage(AudioAttributes.USAGE_ALARM)
-                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                .build());
+                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build());
         
         manager.createNotificationChannel(high);
     }
 
     private void stopForegroundCompat() {
-        if (Build.VERSION.SDK_INT >= 24) {
-            stopForeground(STOP_FOREGROUND_REMOVE);
-        } else {
-            stopForeground(true);
-        }
+        if (Build.VERSION.SDK_INT >= 24) stopForeground(STOP_FOREGROUND_REMOVE);
+        else stopForeground(true);
     }
 }
