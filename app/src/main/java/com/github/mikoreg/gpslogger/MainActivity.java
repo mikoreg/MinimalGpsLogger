@@ -52,6 +52,10 @@ public final class MainActivity extends Activity {
     private @Nullable GpsLoggerService boundService;
     private @Nullable Spinner deviceSpinner;
     private @Nullable ArrayAdapter<DeviceListItem> deviceAdapter;
+    
+    private @Nullable View exportOptionsContainer;
+    private @Nullable Spinner rateSpinner;
+    private @Nullable Spinner distSpinner;
     private @Nullable TextView permissionText;
 
     private @Nullable TextView statusRow;
@@ -110,11 +114,16 @@ public final class MainActivity extends Activity {
         stopBtn = findViewById(R.id.stopBtn);
         exportGpxBtn = findViewById(R.id.exportGpxBtn);
         openMapBtn = findViewById(R.id.openMapBtn);
+        exportOptionsContainer = findViewById(R.id.exportOptionsContainer);
 
         deviceSpinner = findViewById(R.id.deviceSpinner);
         deviceAdapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, new ArrayList<DeviceListItem>());
         deviceAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
         if (deviceSpinner != null) deviceSpinner.setAdapter(deviceAdapter);
+
+        rateSpinner = findViewById(R.id.rateSpinner);
+        distSpinner = findViewById(R.id.distSpinner);
+        setupExportSpinners();
 
         findViewById(R.id.refreshBtn).setOnClickListener(v -> refreshBondedDevices());
         findViewById(R.id.btSettingsBtn).setOnClickListener(v -> startActivity(new Intent(Settings.ACTION_BLUETOOTH_SETTINGS)));
@@ -125,6 +134,31 @@ public final class MainActivity extends Activity {
         
         permissionText = findViewById(R.id.permissionText);
         updateStatsUi(NmeaStats.idle());
+    }
+
+    private void setupExportSpinners() {
+        if (rateSpinner != null) {
+            List<ExportRate> rates = new ArrayList<>();
+            rates.add(new ExportRate("All points (native)", 0));
+            rates.add(new ExportRate("10 Hz (0.1s)", 100));
+            rates.add(new ExportRate("1 Hz (1.0s)", 1000));
+            rates.add(new ExportRate("Every 5s", 5000));
+            rates.add(new ExportRate("Every 10s", 10000));
+            ArrayAdapter<ExportRate> adapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, rates);
+            adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+            rateSpinner.setAdapter(adapter);
+        }
+        if (distSpinner != null) {
+            List<ExportDist> dists = new ArrayList<>();
+            dists.add(new ExportDist("No motion filter", 0));
+            dists.add(new ExportDist("Min. 1 meter", 1f));
+            dists.add(new ExportDist("Min. 3 meters", 3f));
+            dists.add(new ExportDist("Min. 10 meters", 10f));
+            dists.add(new ExportDist("Min. 50 meters", 50f));
+            ArrayAdapter<ExportDist> adapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, dists);
+            adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+            distSpinner.setAdapter(adapter);
+        }
     }
 
     @Override
@@ -161,6 +195,9 @@ public final class MainActivity extends Activity {
         }
         if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             toRequest.add(Manifest.permission.POST_NOTIFICATIONS);
+        }
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            toRequest.add(Manifest.permission.ACCESS_FINE_LOCATION);
         }
         if (Build.VERSION.SDK_INT <= 28 && ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
             toRequest.add(Manifest.permission.WRITE_EXTERNAL_STORAGE);
@@ -340,8 +377,9 @@ public final class MainActivity extends Activity {
             fileRow.setText("FILE: (none)");
         }
 
-        if (exportGpxBtn != null) {
-            exportGpxBtn.setVisibility(!isWorking && !lastLogFile.isEmpty() ? View.VISIBLE : View.GONE);
+        // Show/Hide export area
+        if (exportOptionsContainer != null) {
+            exportOptionsContainer.setVisibility(!isWorking && !lastLogFile.isEmpty() ? View.VISIBLE : View.GONE);
         }
 
         debugRow.setText(String.format("Sats: %s/%s  HDOP: %s  Rate: %s",
@@ -369,8 +407,17 @@ public final class MainActivity extends Activity {
             return;
         }
 
+        long intervalMs = 0;
+        if (rateSpinner != null) {
+            intervalMs = ((ExportRate) rateSpinner.getSelectedItem()).intervalMs;
+        }
+        float minDist = 0;
+        if (distSpinner != null) {
+            minDist = ((ExportDist) distSpinner.getSelectedItem()).minDistMeters;
+        }
+
         try {
-            File gpxInternal = NmeaToGpx.convert(nmea);
+            File gpxInternal = NmeaToGpx.convert(nmea, intervalMs, minDist);
             File downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
             if (!downloadsDir.exists() && !downloadsDir.mkdirs()) {
                 toast("Could not create Downloads directory.");
@@ -417,5 +464,19 @@ public final class MainActivity extends Activity {
         String name() { return name; }
         String address() { return address; }
         @Override public String toString() { return name + " (" + address + ")"; }
+    }
+
+    private static final class ExportRate {
+        final String label;
+        final long intervalMs;
+        ExportRate(String label, long intervalMs) { this.label = label; this.intervalMs = intervalMs; }
+        @Override public String toString() { return label; }
+    }
+
+    private static final class ExportDist {
+        final String label;
+        final float minDistMeters;
+        ExportDist(String label, float minDistMeters) { this.label = label; this.minDistMeters = minDistMeters; }
+        @Override public String toString() { return label; }
     }
 }

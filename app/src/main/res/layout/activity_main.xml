@@ -83,6 +83,59 @@
             android:textColor="#FFFFFF" />
     </LinearLayout>
 
+    <!-- EXPORT OPTIONS AREA (Visible only when logging is stopped) -->
+    <LinearLayout
+        android:id="@+id/exportOptionsContainer"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:paddingTop="12dp"
+        android:visibility="gone">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+            <TextView
+                android:layout_width="100dp"
+                android:layout_height="wrap_content"
+                android:text="Export Rate: "
+                android:textSize="12sp" />
+            <Spinner
+                android:id="@+id/rateSpinner"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingTop="4dp">
+            <TextView
+                android:layout_width="100dp"
+                android:layout_height="wrap_content"
+                android:text="Min. Distance: "
+                android:textSize="12sp" />
+            <Spinner
+                android:id="@+id/distSpinner"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1" />
+        </LinearLayout>
+
+        <Button
+            android:id="@+id/exportGpxBtn"
+            style="?android:attr/buttonStyleSmall"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/btn_export_gpx" />
+    </LinearLayout>
+
     <!-- CONFIG AREA -->
     <LinearLayout
         android:layout_width="match_parent"
@@ -91,51 +144,35 @@
         android:orientation="horizontal"
         android:paddingTop="12dp">
 
-    <Spinner
-        android:id="@+id/deviceSpinner"
-        android:layout_width="0dp"
-        android:layout_height="wrap_content"
-        android:layout_weight="1" />
+        <Spinner
+            android:id="@+id/deviceSpinner"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1" />
 
-    <Button
-        android:id="@+id/refreshBtn"
-        style="?android:attr/buttonStyleSmall"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="REFRESH" />
+        <Button
+            android:id="@+id/refreshBtn"
+            style="?android:attr/buttonStyleSmall"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="REFRESH" />
 
-    <Button
-        android:id="@+id/btSettingsBtn"
-        style="?android:attr/buttonStyleSmall"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="BT SETTINGS" />
+        <Button
+            android:id="@+id/btSettingsBtn"
+            style="?android:attr/buttonStyleSmall"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="BT SETTINGS" />
     </LinearLayout>
 
-    <LinearLayout
+    <Button
+        android:id="@+id/openMapBtn"
+        style="?android:attr/buttonStyleSmall"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:paddingTop="8dp">
-
-        <Button
-            android:id="@+id/openMapBtn"
-            style="?android:attr/buttonStyleSmall"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="@string/btn_view_map"
-            android:visibility="gone" />
-
-        <Button
-            android:id="@+id/exportGpxBtn"
-            style="?android:attr/buttonStyleSmall"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="@string/btn_export_gpx"
-            android:visibility="gone" />
-    </LinearLayout>
+        android:layout_marginTop="8dp"
+        android:text="@string/btn_view_map"
+        android:visibility="gone" />
 
     <TextView
         android:id="@+id/permissionText"

@@ -36,8 +36,7 @@ final class NmeaLoggerEngine implements Runnable {
     private volatile @Nullable NmeaFileLogger currentLogger;
     
     private volatile long lastSuccessfulDataAt = SystemClock.elapsedRealtime();
-    private boolean dataAlarmTriggered = false;
-    private boolean fixAlarmTriggered = false;
+    private boolean alarmTriggered = false;
 
     NmeaLoggerEngine(
             Context context,
@@ -100,7 +99,7 @@ final class NmeaLoggerEngine implements Runnable {
                 mutableStats.setLastError(safeMessage(ex));
                 publish(mutableStats);
                 
-                checkDataAlarm();
+                checkAlarm();
                 
                 closeQuietly(logger);
                 closeQuietly(socket);
@@ -138,32 +137,12 @@ final class NmeaLoggerEngine implements Runnable {
         closeQuietly(currentSocket);
     }
 
-    private void checkDataAlarm() {
-        if (!dataAlarmTriggered && running.get()) {
+    private void checkAlarm() {
+        if (!alarmTriggered && running.get()) {
             long now = SystemClock.elapsedRealtime();
             if (now - lastSuccessfulDataAt > 30000) {
                 sink.onCriticalError("No GPS data for 30 seconds!");
-                dataAlarmTriggered = true;
-            }
-        }
-    }
-    
-    private void checkFixAlarm(MutableNmeaStats stats) {
-        if (!fixAlarmTriggered && running.get()) {
-            long now = SystemClock.elapsedRealtime();
-            long lastFix = stats.getLastPositionRealtimeMs();
-            
-            // If we are logging but haven't received valid coordinates for more than 45 seconds
-            // (Giving some extra time for the first fix)
-            if (lastFix > 0) {
-                if (now - lastFix > 30000) {
-                    sink.onCriticalError("GPS Fix lost (no coordinates for 30s)!");
-                    fixAlarmTriggered = true;
-                }
-            } else if (now - lastSuccessfulDataAt > 60000) {
-                 // Never had a fix, and receiving data for > 60s
-                 sink.onCriticalError("Still no GPS Fix after 60s of data!");
-                 fixAlarmTriggered = true;
+                alarmTriggered = true;
             }
         }
     }
@@ -189,7 +168,7 @@ final class NmeaLoggerEngine implements Runnable {
 
             if (read > 0) {
                 lastSuccessfulDataAt = SystemClock.elapsedRealtime();
-                dataAlarmTriggered = false;
+                alarmTriggered = false;
             }
 
             for (int i = 0; i < read; i++) {
@@ -226,9 +205,6 @@ final class NmeaLoggerEngine implements Runnable {
                 if (timeoutMs > 20000) {
                     throw new IOException("GPS Data timeout.");
                 }
-                
-                checkFixAlarm(mutableStats);
-                
                 mutableStats.setCurrentFileName(logger.currentFileName());
                 mutableStats.setBytesWritten(logger.totalBytesWritten());
                 mutableStats.rollOneSecondWindow(now);
@@ -244,21 +220,17 @@ final class NmeaLoggerEngine implements Runnable {
             NmeaFileLogger logger,
             MutableNmeaStats mutableStats
     ) throws IOException {
+        long now = SystemClock.elapsedRealtime();
         logger.writeLine(line, length);
         mutableStats.incrementSentences();
         mutableStats.incrementWindowSentences();
-        mutableStats.setLastSentenceElapsedRealtimeMs(SystemClock.elapsedRealtime());
-        NmeaParser.parseForStats(line, length, mutableStats);
-        
-        // Reset fix alarm if we just got coordinates
-        if (mutableStats.getLastPositionRealtimeMs() == SystemClock.elapsedRealtime()) {
-            fixAlarmTriggered = false;
-        }
+        mutableStats.setLastSentenceElapsedRealtimeMs(now);
+        NmeaParser.parseForStats(line, length, mutableStats, now);
     }
 
     private void publish(MutableNmeaStats mutableStats) {
         mutableStats.setLastDataRealtimeMs(lastSuccessfulDataAt);
-        sink.onStats(mutableStats.snapshot());
+        sink.onStats(mutableStats.snapshot(SystemClock.elapsedRealtime()));
     }
 
     private static void sleep(long millis) {

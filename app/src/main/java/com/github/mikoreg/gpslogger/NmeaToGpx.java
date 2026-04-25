@@ -1,5 +1,6 @@
 package com.github.mikoreg.gpslogger;
 
+import android.location.Location;
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
 import java.io.File;
@@ -16,7 +17,14 @@ import java.util.TimeZone;
 final class NmeaToGpx {
     private NmeaToGpx() {}
 
-    static File convert(File nmeaFile) throws Exception {
+    /**
+     * Converts a raw NMEA file to GPX format with filters.
+     * @param nmeaFile The source .nmea file.
+     * @param minIntervalMs Minimum time between GPX points in milliseconds. 0 for all points.
+     * @param minDistanceMeters Minimum distance between GPX points in meters. 0 to disable.
+     * @return The created .gpx file.
+     */
+    static File convert(File nmeaFile, long minIntervalMs, float minDistanceMeters) throws Exception {
         String name = nmeaFile.getName();
         if (name.endsWith(".nmea")) {
             name = name.substring(0, name.length() - 5);
@@ -32,31 +40,52 @@ final class NmeaToGpx {
             writer.write("    <name>Track " + name + "</name>\n");
             writer.write("    <trkseg>\n");
 
-            String line;
             MutableNmeaStats tempStats = new MutableNmeaStats("temp");
-            SimpleDateFormat isoFormat = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US);
+            SimpleDateFormat isoFormat = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US);
             isoFormat.setTimeZone(TimeZone.getTimeZone("UTC"));
 
+            String line;
+            long lastWrittenTs = -1;
+            double lastWrittenLat = Double.NaN;
+            double lastWrittenLon = Double.NaN;
+
+            float[] distanceResult = new float[1];
+
             while ((line = reader.readLine()) != null) {
-                if (line.isEmpty() || !line.startsWith("$")) continue;
+                if (!line.startsWith("$")) continue;
                 byte[] bytes = line.getBytes(StandardCharsets.US_ASCII);
                 
-                // We only care about position and altitude
-                // NmeaParser.parseForStats updates the mutable stats
-                NmeaParser.parseForStats(bytes, bytes.length, tempStats);
-                NmeaStats snap = tempStats.snapshot();
+                long now = System.currentTimeMillis();
+                NmeaParser.parseForStats(bytes, bytes.length, tempStats, now);
+                NmeaStats snap = tempStats.snapshot(now);
                 
-                if (snap.fixValid() && !Double.isNaN(snap.latitude()) && !Double.isNaN(snap.longitude())) {
+                boolean isPosSentence = line.contains("GGA") || line.contains("RMC");
+                
+                if (isPosSentence && snap.fixValid() && !Double.isNaN(snap.latitude()) && !Double.isNaN(snap.longitude())) {
+                    long currentTs = snap.utcTimestampMs();
+                    if (currentTs <= 0) currentTs = now;
+
+                    // 1. Time Filter
+                    if (lastWrittenTs != -1 && minIntervalMs > 0) {
+                        if (currentTs - lastWrittenTs < minIntervalMs) continue;
+                    }
+
+                    // 2. Distance/Motion Filter
+                    if (!Double.isNaN(lastWrittenLat) && minDistanceMeters > 0) {
+                        Location.distanceBetween(lastWrittenLat, lastWrittenLon, snap.latitude(), snap.longitude(), distanceResult);
+                        if (distanceResult[0] < minDistanceMeters) continue;
+                    }
+
                     writer.write("      <trkpt lat=\"" + snap.latitude() + "\" lon=\"" + snap.longitude() + "\">\n");
                     if (!Double.isNaN(snap.altitudeMeters())) {
                         writer.write("        <ele>" + snap.altitudeMeters() + "</ele>\n");
                     }
-                    writer.write("        <time>" + isoFormat.format(new Date()) + "</time>\n"); // Ideally we should parse time from NMEA too
+                    writer.write("        <time>" + isoFormat.format(new Date(currentTs)) + "</time>\n");
                     writer.write("      </trkpt>\n");
                     
-                    // Reset position to avoid duplicates if next line doesn't have it
-                    // But NmeaParser updates it only if found. 
-                    // To be safe, we could check if it's a GGA/RMC sentence specifically.
+                    lastWrittenTs = currentTs;
+                    lastWrittenLat = snap.latitude();
+                    lastWrittenLon = snap.longitude();
                 }
             }
 

@@ -1,7 +1,5 @@
 package com.github.mikoreg.gpslogger;
 
-import android.os.SystemClock;
-
 final class MutableNmeaStats {
     private final String deviceName;
     private String state = "IDLE";
@@ -37,6 +35,9 @@ final class MutableNmeaStats {
     private long windowStartRealtimeMs = -1L;
     private long lastDataRealtimeMs = 0;
     private long lastPositionRealtimeMs = 0;
+    
+    private long utcTimestampMs = -1L;
+    private int lastDate = -1; // DDMMYY
 
     MutableNmeaStats(String deviceName) {
         this.deviceName = deviceName;
@@ -62,10 +63,10 @@ final class MutableNmeaStats {
         this.fixValid = fixValid;
     }
 
-    void setPosition(double latitude, double longitude) {
+    void setPosition(double latitude, double longitude, long now) {
         this.latitude = latitude;
         this.longitude = longitude;
-        this.lastPositionRealtimeMs = SystemClock.elapsedRealtime();
+        this.lastPositionRealtimeMs = now;
     }
 
     void setAltitudeMeters(double altitudeMeters) {
@@ -147,6 +148,18 @@ final class MutableNmeaStats {
     long getLastPositionRealtimeMs() {
         return lastPositionRealtimeMs;
     }
+    
+    void setUtcTimestampMs(long utcTimestampMs) {
+        this.utcTimestampMs = utcTimestampMs;
+    }
+    
+    void setLastDate(int lastDate) {
+        this.lastDate = lastDate;
+    }
+    
+    int getLastDate() {
+        return lastDate;
+    }
 
     void rollOneSecondWindow(long now) {
         if (windowStartRealtimeMs < 0) {
@@ -163,11 +176,9 @@ final class MutableNmeaStats {
         }
     }
 
-    NmeaStats snapshot() {
-        long now = SystemClock.elapsedRealtime();
+    NmeaStats snapshot(long now) {
         long age = lastSentenceElapsedRealtimeMs < 0 ? -1L : now - lastSentenceElapsedRealtimeMs;
         
-        // Refine fixValid for UI: must have actual coordinates
         boolean hasCoordinates = !Double.isNaN(latitude) && !Double.isNaN(longitude);
         boolean uiFixValid = fixValid && hasCoordinates;
 
@@ -177,7 +188,7 @@ final class MutableNmeaStats {
                 hdop, vdop, pdop, nmeaSentencesPerSecond,
                 fixQuality, gsaFixType, satellitesUsed, satellitesVisible,
                 bytesWritten, sentencesTotal, checksumErrors, parseErrors, tooLongLines, reconnects,
-                age, lastDataRealtimeMs, lastPositionRealtimeMs
+                age, lastDataRealtimeMs, lastPositionRealtimeMs, utcTimestampMs
         );
     }
 }

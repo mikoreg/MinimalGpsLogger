@@ -1,11 +1,16 @@
 package com.github.mikoreg.gpslogger;
 
+import java.util.Calendar;
+import java.util.TimeZone;
+
 /**
  * Lightweight NMEA sentence parser.
  * This class extracts basic GPS statistics (position, speed, satellites) 
  * from raw NMEA byte arrays without using expensive String operations or Regex.
  */
 final class NmeaParser {
+    private static final TimeZone UTC = TimeZone.getTimeZone("UTC");
+
     private NmeaParser() {
     }
 
@@ -13,7 +18,7 @@ final class NmeaParser {
      * Parses a single NMEA line and updates the provided stats object.
      * Validates checksum before parsing.
      */
-    static void parseForStats(byte[] line, int length, MutableNmeaStats stats) {
+    static void parseForStats(byte[] line, int length, MutableNmeaStats stats, long now) {
         if (length < 6 || line[0] != '$') {
             stats.incrementParseErrors();
             return;
@@ -30,9 +35,9 @@ final class NmeaParser {
 
         try {
             if (a == 'R' && b == 'M' && c == 'C') {
-                parseRmc(line, length, stats);
+                parseRmc(line, length, stats, now);
             } else if (a == 'G' && b == 'G' && c == 'A') {
-                parseGga(line, length, stats);
+                parseGga(line, length, stats, now);
             } else if (a == 'V' && b == 'T' && c == 'G') {
                 parseVtg(line, length, stats);
             } else if (a == 'G' && b == 'S' && c == 'A') {
@@ -45,10 +50,27 @@ final class NmeaParser {
         }
     }
 
-    private static void parseRmc(byte[] line, int length, MutableNmeaStats stats) {
+    private static void parseRmc(byte[] line, int length, MutableNmeaStats stats, long now) {
         Field status = field(line, length, 2);
         boolean valid = status.length() == 1 && upper(line[status.start]) == 'A';
         stats.setFixValid(valid);
+
+        Field timeField = field(line, length, 1);
+        Field dateField = field(line, length, 9);
+        
+        if (dateField.length() == 6) {
+            int day = parseInt(new Field(dateField.start, dateField.start + 2), line);
+            int month = parseInt(new Field(dateField.start + 2, dateField.start + 4), line);
+            int year = parseInt(new Field(dateField.start + 4, dateField.start + 6), line);
+            if (day > 0 && month > 0 && year >= 0) {
+                stats.setLastDate(day * 10000 + month * 100 + year);
+            }
+        }
+
+        if (timeField.length() >= 6) {
+            long ts = parseUtcTimestamp(line, timeField, stats.getLastDate());
+            if (ts > 0) stats.setUtcTimestampMs(ts);
+        }
 
         if (!valid) {
             return;
@@ -57,7 +79,7 @@ final class NmeaParser {
         double latitude = parseCoordinate(line, length, 3, 4, 2);
         double longitude = parseCoordinate(line, length, 5, 6, 3);
         if (!Double.isNaN(latitude) && !Double.isNaN(longitude)) {
-            stats.setPosition(latitude, longitude);
+            stats.setPosition(latitude, longitude, now);
         }
 
         double speedKnots = parseDouble(field(line, length, 7), line);
@@ -71,10 +93,16 @@ final class NmeaParser {
         }
     }
 
-    private static void parseGga(byte[] line, int length, MutableNmeaStats stats) {
+    private static void parseGga(byte[] line, int length, MutableNmeaStats stats, long now) {
         int quality = parseInt(field(line, length, 6), line);
         stats.setFixQuality(quality);
         stats.setFixValid(quality > 0);
+
+        Field timeField = field(line, length, 1);
+        if (timeField.length() >= 6) {
+            long ts = parseUtcTimestamp(line, timeField, stats.getLastDate());
+            if (ts > 0) stats.setUtcTimestampMs(ts);
+        }
 
         int satellites = parseInt(field(line, length, 7), line);
         if (satellites >= 0) {
@@ -94,8 +122,51 @@ final class NmeaParser {
         double latitude = parseCoordinate(line, length, 2, 3, 2);
         double longitude = parseCoordinate(line, length, 4, 5, 3);
         if (!Double.isNaN(latitude) && !Double.isNaN(longitude)) {
-            stats.setPosition(latitude, longitude);
+            stats.setPosition(latitude, longitude, now);
         }
+    }
+
+    private static long parseUtcTimestamp(byte[] line, Field timeField, int date) {
+        if (timeField.length() < 6 || date <= 0) return -1;
+        
+        int hh = parseInt(new Field(timeField.start, timeField.start + 2), line);
+        int mm = parseInt(new Field(timeField.start + 2, timeField.start + 4), line);
+        int ss = parseInt(new Field(timeField.start + 4, timeField.start + 6), line);
+        int ms = 0;
+        
+        int dot = -1;
+        for (int i = timeField.start + 6; i < timeField.end; i++) {
+            if (line[i] == '.') {
+                dot = i;
+                break;
+            }
+        }
+        
+        if (dot != -1) {
+            int fractLen = timeField.end - (dot + 1);
+            int fract = parseInt(new Field(dot + 1, timeField.end), line);
+            if (fractLen == 1) ms = fract * 100;
+            else if (fractLen == 2) ms = fract * 10;
+            else if (fractLen == 3) ms = fract;
+            else if (fractLen > 3) {
+                ms = parseInt(new Field(dot + 1, dot + 4), line);
+            }
+        }
+        
+        int day = date / 10000;
+        int month = (date / 100) % 100;
+        int year = date % 100 + 2000;
+        
+        Calendar cal = Calendar.getInstance(UTC);
+        cal.set(Calendar.YEAR, year);
+        cal.set(Calendar.MONTH, month - 1);
+        cal.set(Calendar.DAY_OF_MONTH, day);
+        cal.set(Calendar.HOUR_OF_DAY, hh);
+        cal.set(Calendar.MINUTE, mm);
+        cal.set(Calendar.SECOND, ss);
+        cal.set(Calendar.MILLISECOND, ms);
+        
+        return cal.getTimeInMillis();
     }
 
     private static void parseVtg(byte[] line, int length, MutableNmeaStats stats) {
