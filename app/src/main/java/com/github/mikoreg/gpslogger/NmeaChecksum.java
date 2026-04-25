@@ -1,9 +1,19 @@
 package com.github.mikoreg.gpslogger;
 
+/**
+ * Utility for NMEA sentence checksum validation.
+ * NMEA sentences use a simple XOR-based checksum at the end of the line.
+ */
 final class NmeaChecksum {
     private NmeaChecksum() {
     }
 
+    /**
+     * Validates the checksum of an NMEA sentence.
+     * @param line Byte array containing the NMEA sentence.
+     * @param length Effective length of the sentence.
+     * @return true if the checksum is valid, false otherwise.
+     */
     static boolean isValid(byte[] line, int length) {
         if (length < 4 || line[0] != '$') {
             return false;

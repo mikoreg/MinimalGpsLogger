@@ -11,7 +11,7 @@ Built for users who need a reliable way to capture raw NMEA data from high-preci
 - **Direct Bluetooth Logging:** Connects to any Bluetooth Classic GPS module using SPP.
 - **Raw Data Integrity:** Saves the exact NMEA stream as received.
 - **Background Operation:** Runs as a Foreground Service with high-priority alerts.
-- **GPX Export:** Easily convert your raw NMEA logs to GPX files for use in map applications.
+- **GPX Export:** Easily convert your raw NMEA logs to GPX files. Exported files are automatically saved to your system **Downloads** folder with a notification.
 - **Panic System:** Sounds an alarm and vibrates if GPS data stops flowing for more than 30 seconds.
 - **Visual Status:** Color-coded notification icons (Green for standby, Red for recording).
 - **External Map Integration:** Quickly view your current location in your favorite map app.

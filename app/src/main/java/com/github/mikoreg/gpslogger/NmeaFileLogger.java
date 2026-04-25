@@ -12,6 +12,10 @@ import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.Locale;
 
+/**
+ * Handles persistent logging of raw NMEA data to the device storage.
+ * Supports automatic file rotation and buffered writing for efficiency.
+ */
 final class NmeaFileLogger implements AutoCloseable {
     static final long FLUSH_PERIOD_MS = 5000L;
 
@@ -40,6 +44,10 @@ final class NmeaFileLogger implements AutoCloseable {
         openNextFile();
     }
 
+    /**
+     * Writes a single NMEA line to the current file.
+     * Automatically handles file rotation if the current file exceeds the maximum size.
+     */
     void writeLine(byte[] line, int length) throws IOException {
         BufferedOutputStream stream = requireStream();
         stream.write(line, 0, length);
@@ -52,6 +60,9 @@ final class NmeaFileLogger implements AutoCloseable {
         }
     }
 
+    /**
+     * Forces any buffered data to be written to the disk.
+     */
     void flush() throws IOException {
         BufferedOutputStream stream = out;
         if (stream != null) {

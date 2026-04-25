@@ -2,6 +2,7 @@ package com.github.mikoreg.gpslogger;
 
 import android.Manifest;
 import android.app.Activity;
+import android.app.DownloadManager;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
 import android.content.ComponentName;
@@ -13,6 +14,7 @@ import android.graphics.Typeface;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Environment;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
@@ -31,12 +33,17 @@ import android.widget.Toast;
 import org.jspecify.annotations.Nullable;
 
 import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.nio.channels.FileChannel;
 import java.util.ArrayList;
 import java.util.Set;
 
 public final class MainActivity extends Activity {
     private static final int REQUEST_BLUETOOTH_CONNECT = 1001;
     private static final int REQUEST_POST_NOTIFICATIONS = 1002;
+    private static final int REQUEST_STORAGE = 1003;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
 
@@ -62,7 +69,7 @@ public final class MainActivity extends Activity {
         @Override
         public void run() {
             refreshStatsUi();
-            handler.postDelayed(this, 500L); // Faster refresh for countdown
+            handler.postDelayed(this, 500L);
         }
     };
 
@@ -111,7 +118,7 @@ public final class MainActivity extends Activity {
 
         if (startBtn != null) startBtn.setOnClickListener(v -> startLogging());
         if (stopBtn != null) stopBtn.setOnClickListener(v -> stopLogging());
-        if (exportGpxBtn != null) exportGpxBtn.setOnClickListener(v -> exportToGpx());
+        if (exportGpxBtn != null) exportGpxBtn.setOnClickListener(v -> exportToGpxWithNotification());
         
         permissionText = findViewById(R.id.permissionText);
         
@@ -151,6 +158,12 @@ public final class MainActivity extends Activity {
         if (Build.VERSION.SDK_INT >= 33
                 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, REQUEST_POST_NOTIFICATIONS);
+        }
+        // Storage permission for public downloads on Android 6.0 to 9.0
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && Build.VERSION.SDK_INT <= 28) {
+            if (checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+                requestPermissions(new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE}, REQUEST_STORAGE);
+            }
         }
     }
 
@@ -234,7 +247,6 @@ public final class MainActivity extends Activity {
         String state = stats.state();
         boolean isWorking = !"IDLE".equals(state) && !"STOPPED".equals(state);
 
-        // Update button states
         if (startBtn != null) {
             startBtn.setEnabled(!isWorking);
             startBtn.setAlpha(isWorking ? 0.4f : 1.0f);
@@ -244,7 +256,6 @@ public final class MainActivity extends Activity {
             stopBtn.setAlpha(isWorking ? 1.0f : 0.4f);
         }
 
-        // Line 1: Status
         SpannableStringBuilder sb1 = new SpannableStringBuilder();
         String stateSymbol = "[ ]";
         int stateColor = 0xFF757575;
@@ -263,7 +274,6 @@ public final class MainActivity extends Activity {
         sb1.setSpan(new ForegroundColorSpan(stateColor), 0, sb1.length(), 0);
         sb1.setSpan(new StyleSpan(Typeface.BOLD), 0, sb1.length(), 0);
         
-        // Timeout Countdown logic
         if (isWorking) {
             long now = SystemClock.elapsedRealtime();
             long lastData = stats.lastDataRealtimeMs();
@@ -284,12 +294,10 @@ public final class MainActivity extends Activity {
         }
         statusRow.setText(sb1);
 
-        // Line 2: Position
         posRow.setText(String.format("LAT: %s, LON: %s", 
                 stats.formatDouble(stats.latitude(), 6), 
                 stats.formatDouble(stats.longitude(), 6)));
 
-        // Map Button context
         if (openMapBtn != null) {
             boolean hasFix = stats.fixValid();
             openMapBtn.setVisibility(hasFix ? View.VISIBLE : View.GONE);
@@ -298,13 +306,11 @@ public final class MainActivity extends Activity {
             }
         }
 
-        // Line 3: Detail Row (Alt, Speed, Course)
         detailRow.setText(String.format("ALT: %s m | SPD: %s km/h | CRS: %s", 
                 stats.formatDouble(stats.altitudeMeters(), 1),
                 stats.formatDouble(stats.speedKmh(), 1),
                 stats.formatDouble(stats.courseDegrees(), 0)));
 
-        // Line 4: File
         String path = stats.currentFileName();
         if (!path.isEmpty()) {
             lastLogFile = path;
@@ -314,12 +320,10 @@ public final class MainActivity extends Activity {
             fileRow.setText("FILE: (none)");
         }
 
-        // Export Button visibility
         if (exportGpxBtn != null) {
             exportGpxBtn.setVisibility(!isWorking && !lastLogFile.isEmpty() ? View.VISIBLE : View.GONE);
         }
 
-        // Debug/Extra
         debugRow.setText(String.format("Sats: %s/%s  HDOP: %s  Rate: %s",
                 stats.formatInt(stats.satellitesUsed()),
                 stats.formatInt(stats.satellitesVisible()),
@@ -337,18 +341,48 @@ public final class MainActivity extends Activity {
         }
     }
 
-    private void exportToGpx() {
+    private void exportToGpxWithNotification() {
         if (lastLogFile.isEmpty()) return;
         File nmea = new File(lastLogFile);
         if (!nmea.exists()) {
-            toast("File not found: " + lastLogFile);
+            toast("Source file missing.");
             return;
         }
+
         try {
-            File gpx = NmeaToGpx.convert(nmea);
-            toast("GPX exported to: " + gpx.getName());
+            File gpxInternal = NmeaToGpx.convert(nmea);
+            File downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
+            if (!downloadsDir.exists() && !downloadsDir.mkdirs()) {
+                toast("Could not create Downloads directory.");
+                return;
+            }
+            File gpxExternal = new File(downloadsDir, gpxInternal.getName());
+            copyFile(gpxInternal, gpxExternal);
+
+            DownloadManager dm = (DownloadManager) getSystemService(Context.DOWNLOAD_SERVICE);
+            if (dm != null) {
+                dm.addCompletedDownload(
+                        gpxExternal.getName(),
+                        "GPS Track Log",
+                        true,
+                        "application/gpx+xml",
+                        gpxExternal.getAbsolutePath(),
+                        gpxExternal.length(),
+                        true
+                );
+                toast("GPX exported to Downloads folder!");
+            }
         } catch (Exception e) {
-            toast("Export error: " + e.getMessage());
+            toast("Export failed: " + e.getMessage());
+        }
+    }
+
+    private void copyFile(File src, File dst) throws IOException {
+        try (FileInputStream fis = new FileInputStream(src);
+             FileOutputStream fos = new FileOutputStream(dst);
+             FileChannel inChannel = fis.getChannel();
+             FileChannel outChannel = fos.getChannel()) {
+            inChannel.transferTo(0, inChannel.size(), outChannel);
         }
     }
 
