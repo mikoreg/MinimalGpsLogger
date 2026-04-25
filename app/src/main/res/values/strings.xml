@@ -1,0 +1,9 @@
+<resources>
+    <string name="app_name">Minimal GPS Logger</string>
+    <string name="btn_start">START</string>
+    <string name="btn_stop">STOP</string>
+    <string name="btn_refresh">REFRESH</string>
+    <string name="btn_bt_settings">BT SETTINGS</string>
+    <string name="btn_view_map">VIEW ON MAP</string>
+    <string name="btn_export_gpx">EXPORT GPX</string>
+</resources>
