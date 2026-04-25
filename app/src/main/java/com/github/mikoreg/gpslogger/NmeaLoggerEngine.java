@@ -36,7 +36,8 @@ final class NmeaLoggerEngine implements Runnable {
     private volatile @Nullable NmeaFileLogger currentLogger;
     
     private volatile long lastSuccessfulDataAt = SystemClock.elapsedRealtime();
-    private boolean alarmTriggered = false;
+    private boolean dataAlarmTriggered = false;
+    private boolean fixAlarmTriggered = false;
 
     NmeaLoggerEngine(
             Context context,
@@ -99,7 +100,7 @@ final class NmeaLoggerEngine implements Runnable {
                 mutableStats.setLastError(safeMessage(ex));
                 publish(mutableStats);
                 
-                checkAlarm();
+                checkDataAlarm();
                 
                 closeQuietly(logger);
                 closeQuietly(socket);
@@ -137,12 +138,32 @@ final class NmeaLoggerEngine implements Runnable {
         closeQuietly(currentSocket);
     }
 
-    private void checkAlarm() {
-        if (!alarmTriggered && running.get()) {
+    private void checkDataAlarm() {
+        if (!dataAlarmTriggered && running.get()) {
             long now = SystemClock.elapsedRealtime();
             if (now - lastSuccessfulDataAt > 30000) {
                 sink.onCriticalError("No GPS data for 30 seconds!");
-                alarmTriggered = true;
+                dataAlarmTriggered = true;
+            }
+        }
+    }
+    
+    private void checkFixAlarm(MutableNmeaStats stats) {
+        if (!fixAlarmTriggered && running.get()) {
+            long now = SystemClock.elapsedRealtime();
+            long lastFix = stats.getLastPositionRealtimeMs();
+            
+            // If we are logging but haven't received valid coordinates for more than 45 seconds
+            // (Giving some extra time for the first fix)
+            if (lastFix > 0) {
+                if (now - lastFix > 30000) {
+                    sink.onCriticalError("GPS Fix lost (no coordinates for 30s)!");
+                    fixAlarmTriggered = true;
+                }
+            } else if (now - lastSuccessfulDataAt > 60000) {
+                 // Never had a fix, and receiving data for > 60s
+                 sink.onCriticalError("Still no GPS Fix after 60s of data!");
+                 fixAlarmTriggered = true;
             }
         }
     }
@@ -168,7 +189,7 @@ final class NmeaLoggerEngine implements Runnable {
 
             if (read > 0) {
                 lastSuccessfulDataAt = SystemClock.elapsedRealtime();
-                alarmTriggered = false;
+                dataAlarmTriggered = false;
             }
 
             for (int i = 0; i < read; i++) {
@@ -205,6 +226,9 @@ final class NmeaLoggerEngine implements Runnable {
                 if (timeoutMs > 20000) {
                     throw new IOException("GPS Data timeout.");
                 }
+                
+                checkFixAlarm(mutableStats);
+                
                 mutableStats.setCurrentFileName(logger.currentFileName());
                 mutableStats.setBytesWritten(logger.totalBytesWritten());
                 mutableStats.rollOneSecondWindow(now);
@@ -225,6 +249,11 @@ final class NmeaLoggerEngine implements Runnable {
         mutableStats.incrementWindowSentences();
         mutableStats.setLastSentenceElapsedRealtimeMs(SystemClock.elapsedRealtime());
         NmeaParser.parseForStats(line, length, mutableStats);
+        
+        // Reset fix alarm if we just got coordinates
+        if (mutableStats.getLastPositionRealtimeMs() == SystemClock.elapsedRealtime()) {
+            fixAlarmTriggered = false;
+        }
     }
 
     private void publish(MutableNmeaStats mutableStats) {

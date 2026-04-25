@@ -159,7 +159,6 @@ public final class MainActivity extends Activity {
                 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, REQUEST_POST_NOTIFICATIONS);
         }
-        // Storage permission for public downloads on Android 6.0 to 9.0
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && Build.VERSION.SDK_INT <= 28) {
             if (checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
                 requestPermissions(new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE}, REQUEST_STORAGE);
@@ -274,14 +273,36 @@ public final class MainActivity extends Activity {
         sb1.setSpan(new ForegroundColorSpan(stateColor), 0, sb1.length(), 0);
         sb1.setSpan(new StyleSpan(Typeface.BOLD), 0, sb1.length(), 0);
         
+        // Timeout Countdown logic
         if (isWorking) {
             long now = SystemClock.elapsedRealtime();
             long lastData = stats.lastDataRealtimeMs();
+            long lastFix = stats.lastPositionRealtimeMs();
+            
+            // Check Data Timeout
             if (lastData > 0) {
                 long diffMs = now - lastData;
                 if (diffMs > 2000) {
                     long remainingSec = Math.max(0, 30 - (diffMs / 1000));
-                    sb1.append(" (PANIC IN ").append(String.valueOf(remainingSec)).append("s!)");
+                    sb1.append(" (DATA PANIC IN ").append(String.valueOf(remainingSec)).append("s!)");
+                }
+            }
+            
+            // Check Fix Timeout (if we have data but no fix for long time)
+            if (lastData > 0 && (now - lastData < 5000)) { // Only if data is flowing
+                if (lastFix > 0) {
+                    long fixDiffMs = now - lastFix;
+                    if (fixDiffMs > 10000) { // Show warning after 10s no fix
+                        long remainingFix = Math.max(0, 30 - (fixDiffMs / 1000));
+                        sb1.append(" (FIX PANIC IN ").append(String.valueOf(remainingFix)).append("s!)");
+                    }
+                } else {
+                    // Never had a fix
+                    long sinceStart = now - lastData; // Approx
+                    if (sinceStart > 30000) {
+                         long remainingFirstFix = Math.max(0, 60 - (sinceStart / 1000));
+                         sb1.append(" (NO FIX PANIC IN ").append(String.valueOf(remainingFirstFix)).append("s!)");
+                    }
                 }
             }
         }

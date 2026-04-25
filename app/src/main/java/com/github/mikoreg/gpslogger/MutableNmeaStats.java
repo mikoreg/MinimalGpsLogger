@@ -36,6 +36,7 @@ final class MutableNmeaStats {
     private long lastSentenceElapsedRealtimeMs = -1L;
     private long windowStartRealtimeMs = -1L;
     private long lastDataRealtimeMs = 0;
+    private long lastPositionRealtimeMs = 0;
 
     MutableNmeaStats(String deviceName) {
         this.deviceName = deviceName;
@@ -64,6 +65,7 @@ final class MutableNmeaStats {
     void setPosition(double latitude, double longitude) {
         this.latitude = latitude;
         this.longitude = longitude;
+        this.lastPositionRealtimeMs = SystemClock.elapsedRealtime();
     }
 
     void setAltitudeMeters(double altitudeMeters) {
@@ -142,6 +144,10 @@ final class MutableNmeaStats {
         this.lastDataRealtimeMs = lastDataRealtimeMs;
     }
 
+    long getLastPositionRealtimeMs() {
+        return lastPositionRealtimeMs;
+    }
+
     void rollOneSecondWindow(long now) {
         if (windowStartRealtimeMs < 0) {
             windowStartRealtimeMs = now;
@@ -160,13 +166,18 @@ final class MutableNmeaStats {
     NmeaStats snapshot() {
         long now = SystemClock.elapsedRealtime();
         long age = lastSentenceElapsedRealtimeMs < 0 ? -1L : now - lastSentenceElapsedRealtimeMs;
+        
+        // Refine fixValid for UI: must have actual coordinates
+        boolean hasCoordinates = !Double.isNaN(latitude) && !Double.isNaN(longitude);
+        boolean uiFixValid = fixValid && hasCoordinates;
+
         return new NmeaStats(
-                state, deviceName, currentFileName, lastError, connected, fixValid,
+                state, deviceName, currentFileName, lastError, connected, uiFixValid,
                 latitude, longitude, altitudeMeters, speedKmh, courseDegrees,
                 hdop, vdop, pdop, nmeaSentencesPerSecond,
                 fixQuality, gsaFixType, satellitesUsed, satellitesVisible,
                 bytesWritten, sentencesTotal, checksumErrors, parseErrors, tooLongLines, reconnects,
-                age, lastDataRealtimeMs
+                age, lastDataRealtimeMs, lastPositionRealtimeMs
         );
     }
 }

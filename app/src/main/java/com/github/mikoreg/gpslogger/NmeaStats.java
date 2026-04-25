@@ -30,6 +30,7 @@ public final class NmeaStats {
     private final long reconnects;
     private final long lastSentenceAgeMs;
     private final long lastDataRealtimeMs;
+    private final long lastPositionRealtimeMs;
 
     NmeaStats(
             String state,
@@ -58,7 +59,8 @@ public final class NmeaStats {
             long tooLongLines,
             long reconnects,
             long lastSentenceAgeMs,
-            long lastDataRealtimeMs
+            long lastDataRealtimeMs,
+            long lastPositionRealtimeMs
     ) {
         this.state = state;
         this.deviceName = deviceName;
@@ -87,6 +89,7 @@ public final class NmeaStats {
         this.reconnects = reconnects;
         this.lastSentenceAgeMs = lastSentenceAgeMs;
         this.lastDataRealtimeMs = lastDataRealtimeMs;
+        this.lastPositionRealtimeMs = lastPositionRealtimeMs;
     }
 
     public static NmeaStats idle() {
@@ -95,7 +98,7 @@ public final class NmeaStats {
                 Double.NaN, Double.NaN, Double.NaN, Double.NaN, Double.NaN,
                 Double.NaN, Double.NaN, Double.NaN, Double.NaN,
                 -1, -1, -1, -1,
-                0L, 0L, 0L, 0L, 0L, 0L, -1L, 0L
+                0L, 0L, 0L, 0L, 0L, 0L, -1L, 0L, 0L
         );
     }
 
@@ -105,7 +108,7 @@ public final class NmeaStats {
                 Double.NaN, Double.NaN, Double.NaN, Double.NaN, Double.NaN,
                 Double.NaN, Double.NaN, Double.NaN, Double.NaN,
                 -1, -1, -1, -1,
-                0L, 0L, 0L, 0L, 0L, 0L, -1L, 0L
+                0L, 0L, 0L, 0L, 0L, 0L, -1L, 0L, 0L
         );
     }
 
@@ -116,7 +119,7 @@ public final class NmeaStats {
                 hdop, vdop, pdop, nmeaSentencesPerSecond,
                 fixQuality, gsaFixType, satellitesUsed, satellitesVisible,
                 bytesWritten, sentencesTotal, checksumErrors, parseErrors, tooLongLines, reconnects,
-                lastSentenceAgeMs, lastDataRealtimeMs
+                lastSentenceAgeMs, lastDataRealtimeMs, lastPositionRealtimeMs
         );
     }
 
@@ -147,6 +150,7 @@ public final class NmeaStats {
     public long reconnects() { return reconnects; }
     public long lastSentenceAgeMs() { return lastSentenceAgeMs; }
     public long lastDataRealtimeMs() { return lastDataRealtimeMs; }
+    public long lastPositionRealtimeMs() { return lastPositionRealtimeMs; }
 
     public String formatDouble(double value, int decimals) {
         if (Double.isNaN(value)) return "-";
