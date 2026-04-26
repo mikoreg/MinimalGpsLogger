@@ -1,17 +1,21 @@
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"
-    android:viewportWidth="512"
-    android:viewportHeight="512">
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- Stylized 'G' Polyline Path - Enlarged -->
     <path
-        android:fillColor="#C62828"
-        android:pathData="M256,256m-240,0a240,240 0,1 1,480,0a240,240 0,1 1,-480,0" />
-    <path
-        android:strokeColor="#FFFFFF"
-        android:strokeWidth="20"
+        android:pathData="M21,3 L3,3 L3,21 L21,21 L21,12 L12,12"
+        android:strokeColor="#FF000000"
+        android:strokeWidth="3"
         android:strokeLineCap="round"
-        android:pathData="M140,350 L200,280 L280,320 L380,180" />
+        android:strokeLineJoin="round"/>
+    <!-- Large End Node at the center of 'G' -->
     <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M380,180m-35,0a35,35 0,1 1,70,0a35,35 0,1 1,-70,0" />
+        android:pathData="M12,12m-2.5,0a2.5,2.5 0,1 1,5 0a2.5,2.5 0,1 1,-5 0"
+        android:fillColor="#FF000000"/>
+    <!-- Status Symbol: Recording (Red Dot in bottom-right, slightly adjusted for size) -->
+    <path
+        android:pathData="M20,20m-3.5,0a3.5,3.5 0,1 1,7 0a3.5,3.5 0,1 1,-7 0"
+        android:fillColor="#FFE53935"/>
 </vector>

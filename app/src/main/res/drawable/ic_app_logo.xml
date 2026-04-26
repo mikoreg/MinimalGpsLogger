@@ -1,17 +1,28 @@
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="192dp"
-    android:height="192dp"
-    android:viewportWidth="512"
-    android:viewportHeight="512">
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Background Circle for App Icon -->
     <path
-        android:fillColor="#2E7D32"
-        android:pathData="M256,256m-240,0a240,240 0,1 1,480,0a240,240 0,1 1,-480,0" />
+        android:pathData="M54,54m-48,0a48,48 0,1 1,96 0a48,48 0,1 1,-96 0"
+        android:fillColor="#F5F5F5"/>
+
+    <!-- Large Stylized 'G' to match status icons -->
     <path
-        android:strokeColor="#FFFFFF"
-        android:strokeWidth="15"
+        android:pathData="M80,30 L28,30 L28,78 L80,78 L80,54 L54,54"
+        android:strokeColor="#1565C0"
+        android:strokeWidth="8"
         android:strokeLineCap="round"
-        android:pathData="M140,350 L200,280 L280,320 L380,180" />
+        android:strokeLineJoin="round"/>
+
+    <!-- Large End Node -->
     <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M380,180m-30,0a30,30 0,1 1,60,0a30,30 0,1 1,-60,0" />
+        android:pathData="M54,54m-7,0a7,7 0,1 1,14 0a7,7 0,1 1,-14 0"
+        android:fillColor="#1565C0"/>
+
+    <!-- Accent Dot (similar to recording dot but fits the logo) -->
+    <path
+        android:pathData="M85,85m-8,0a8,8 0,1 1,16 0a8,8 0,1 1,-16 0"
+        android:fillColor="#E53935"/>
 </vector>

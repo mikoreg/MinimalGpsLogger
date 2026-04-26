@@ -35,6 +35,7 @@ final class MutableNmeaStats {
     private long windowStartRealtimeMs = -1L;
     private long lastDataRealtimeMs = 0;
     private long lastPositionRealtimeMs = 0;
+    private long sessionStartRealtimeMs = 0;
     
     private long utcTimestampMs = -1L;
     private int lastDate = -1; // DDMMYY
@@ -113,6 +114,10 @@ final class MutableNmeaStats {
         this.bytesWritten = bytesWritten;
     }
 
+    void setSessionStartRealtimeMs(long sessionStartRealtimeMs) {
+        this.sessionStartRealtimeMs = sessionStartRealtimeMs;
+    }
+
     void incrementSentences() {
         this.sentencesTotal++;
     }
@@ -188,7 +193,8 @@ final class MutableNmeaStats {
                 hdop, vdop, pdop, nmeaSentencesPerSecond,
                 fixQuality, gsaFixType, satellitesUsed, satellitesVisible,
                 bytesWritten, sentencesTotal, checksumErrors, parseErrors, tooLongLines, reconnects,
-                age, lastDataRealtimeMs, lastPositionRealtimeMs, utcTimestampMs
+                age, lastDataRealtimeMs, lastPositionRealtimeMs, utcTimestampMs,
+                sessionStartRealtimeMs
         );
     }
 }

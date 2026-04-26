@@ -1,5 +1,6 @@
 package com.github.mikoreg.gpslogger;
 
+import android.Manifest;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
@@ -8,6 +9,7 @@ import android.app.Service;
 import android.bluetooth.BluetoothAdapter;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.media.AudioAttributes;
 import android.media.RingtoneManager;
 import android.net.Uri;
@@ -15,14 +17,19 @@ import android.os.Binder;
 import android.os.Build;
 import android.os.IBinder;
 import android.os.Vibrator;
+import android.util.Log;
 
 import org.jspecify.annotations.Nullable;
 
 public final class GpsLoggerService extends Service {
+    private static final String TAG = "GpsLoggerService";
     public static final String ACTION_START = "com.github.mikoreg.gpslogger.action.START";
     public static final String ACTION_STOP = "com.github.mikoreg.gpslogger.action.STOP";
     public static final String EXTRA_DEVICE_ADDRESS = "com.github.mikoreg.gpslogger.extra.DEVICE_ADDRESS";
     public static final String EXTRA_DEVICE_NAME = "com.github.mikoreg.gpslogger.extra.DEVICE_NAME";
+    public static final String EXTRA_SOURCE_TYPE = "com.github.mikoreg.gpslogger.extra.SOURCE_TYPE";
+    public static final String SOURCE_BLUETOOTH = "bluetooth";
+    public static final String SOURCE_INTERNAL = "internal";
 
     private static final String CHANNEL_ID_LOW = "gps_logger_channel_low";
     private static final String CHANNEL_ID_HIGH = "gps_logger_channel_high";
@@ -31,7 +38,7 @@ public final class GpsLoggerService extends Service {
 
     private final LocalBinder binder = new LocalBinder();
     private volatile NmeaStats stats = NmeaStats.idle();
-    private volatile @Nullable NmeaLoggerEngine engine;
+    private volatile @Nullable StoppableLoggerEngine engine;
     private volatile @Nullable Thread engineThread;
 
     public final class LocalBinder extends Binder {
@@ -50,17 +57,26 @@ public final class GpsLoggerService extends Service {
     public int onStartCommand(@Nullable Intent intent, int flags, int startId) {
         String action = intent == null ? null : intent.getAction();
         if (ACTION_START.equals(action)) {
+            String sourceType = intent.getStringExtra(EXTRA_SOURCE_TYPE);
+            if (sourceType == null || sourceType.isEmpty()) {
+                sourceType = SOURCE_BLUETOOTH;
+            }
             String address = intent.getStringExtra(EXTRA_DEVICE_ADDRESS);
             String name = intent.getStringExtra(EXTRA_DEVICE_NAME);
-            if (address == null || address.isEmpty()) {
+            if (SOURCE_BLUETOOTH.equals(sourceType) && (address == null || address.isEmpty())) {
                 stats = NmeaStats.error("Missing Bluetooth MAC address.");
+                return START_NOT_STICKY;
+            }
+            if (SOURCE_INTERNAL.equals(sourceType) && !hasFineLocationPermission()) {
+                stats = NmeaStats.error("Missing ACCESS_FINE_LOCATION permission.");
+                onCriticalError("Internal GPS permission missing.");
                 return START_NOT_STICKY;
             }
             if (name == null || name.isEmpty()) {
                 name = address;
             }
-            startInForeground();
-            startEngine(address, name);
+            startInForeground(sourceType);
+            startEngine(sourceType, address, name);
             return START_STICKY;
         }
 
@@ -87,37 +103,50 @@ public final class GpsLoggerService extends Service {
         return stats;
     }
 
-    private void startEngine(String address, String deviceName) {
+    private boolean hasFineLocationPermission() {
+        if (Build.VERSION.SDK_INT < 23) return true;
+        return checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED;
+    }
+
+    private void startEngine(String sourceType, @Nullable String address, @Nullable String deviceName) {
         stopEngineOnly();
 
-        BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
-        if (adapter == null) {
-            stats = NmeaStats.error("No Bluetooth adapter found.");
-            onCriticalError("Hardware error: No Bluetooth");
-            stopForegroundCompat();
-            stopSelf();
-            return;
+        NmeaLoggerEngine.StatsSink statsSink = new NmeaLoggerEngine.StatsSink() {
+            @Override
+            public void onStats(NmeaStats newStats) {
+                stats = newStats;
+                updateForegroundNotification();
+            }
+
+            @Override
+            public void onCriticalError(String message) {
+                GpsLoggerService.this.onCriticalError(message);
+            }
+        };
+
+        StoppableLoggerEngine newEngine;
+        if (SOURCE_INTERNAL.equals(sourceType)) {
+            newEngine = new InternalNmeaEngine(this, statsSink);
+        } else {
+            BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
+            if (adapter == null) {
+                stats = NmeaStats.error("No Bluetooth adapter found.");
+                onCriticalError("Hardware error: No Bluetooth");
+                stopForegroundCompat();
+                stopSelf();
+                return;
+            }
+            if (address == null || address.isEmpty()) {
+                stats = NmeaStats.error("Missing Bluetooth MAC address.");
+                stopForegroundCompat();
+                stopSelf();
+                return;
+            }
+            String safeDeviceName = deviceName == null || deviceName.isEmpty() ? address : deviceName;
+            newEngine = new NmeaLoggerEngine(this, adapter, address, safeDeviceName, statsSink);
         }
 
-        NmeaLoggerEngine newEngine = new NmeaLoggerEngine(
-                this,
-                adapter,
-                address,
-                deviceName,
-                new NmeaLoggerEngine.StatsSink() {
-                    @Override
-                    public void onStats(NmeaStats newStats) {
-                        stats = newStats;
-                        updateForegroundNotification();
-                    }
-
-                    @Override
-                    public void onCriticalError(String message) {
-                        GpsLoggerService.this.onCriticalError(message);
-                    }
-                }
-        );
-        Thread newThread = new Thread(newEngine, "gps-nmea-logger");
+        Thread newThread = new Thread(newEngine, "gps-nmea-logger-" + sourceType);
         engine = newEngine;
         engineThread = newThread;
         newThread.start();
@@ -134,7 +163,7 @@ public final class GpsLoggerService extends Service {
     }
 
     private void stopEngineOnly() {
-        NmeaLoggerEngine currentEngine = engine;
+        StoppableLoggerEngine currentEngine = engine;
         if (currentEngine != null) {
             currentEngine.stop();
         }
@@ -150,12 +179,13 @@ public final class GpsLoggerService extends Service {
         engineThread = null;
     }
 
-    private void startInForeground() {
+    private void startInForeground(String sourceType) {
         Notification notification = buildForegroundNotification("GPS Logger Running", "Initializing...", R.drawable.ic_stat_gps_waiting);
         if (Build.VERSION.SDK_INT >= 29) {
-            // Using literal value 0x00000010 for FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE 
-            // to avoid verification issues on Android 5
-            startForeground(NOTIFICATION_ID, notification, 0x00000010);
+            int foregroundServiceType = SOURCE_INTERNAL.equals(sourceType)
+                    ? 0x00000008  // ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
+                    : 0x00000010; // ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
+            startForeground(NOTIFICATION_ID, notification, foregroundServiceType);
         } else {
             startForeground(NOTIFICATION_ID, notification);
         }
@@ -175,6 +205,7 @@ public final class GpsLoggerService extends Service {
     }
 
     private void onCriticalError(String message) {
+        Log.e(TAG, "CRITICAL LOGGER ERROR: " + message);
         showHighPriorityNotification("CRITICAL LOGGER ERROR", message);
         triggerVibration();
     }
@@ -196,6 +227,7 @@ public final class GpsLoggerService extends Service {
                 .setContentTitle(title)
                 .setContentText(text)
                 .setSmallIcon(iconRes)
+                .setColor(0xFF1565C0)
                 .setContentIntent(pendingIntent)
                 .setOngoing(true)
                 .build();
@@ -214,6 +246,7 @@ public final class GpsLoggerService extends Service {
                 .setContentTitle(title)
                 .setContentText(text)
                 .setSmallIcon(R.drawable.ic_stat_gps_waiting)
+                .setColor(0xFFC62828)
                 .setContentIntent(pendingIntent)
                 .setAutoCancel(true)
                 .setSound(alarmSound)
