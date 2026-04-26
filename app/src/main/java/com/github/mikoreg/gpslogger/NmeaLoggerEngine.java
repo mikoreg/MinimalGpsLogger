@@ -14,7 +14,7 @@ import java.io.InputStream;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-final class NmeaLoggerEngine implements Runnable {
+final class NmeaLoggerEngine implements StoppableLoggerEngine {
     private static final UUID SPP_UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB");
     private static final int READ_BUFFER_SIZE = 4096;
     private static final int LINE_BUFFER_SIZE = 1024;
@@ -35,8 +35,10 @@ final class NmeaLoggerEngine implements Runnable {
     private volatile @Nullable BluetoothSocket currentSocket;
     private volatile @Nullable NmeaFileLogger currentLogger;
     
-    private volatile long lastSuccessfulDataAt = SystemClock.elapsedRealtime();
-    private boolean alarmTriggered = false;
+    private long sessionStartAt;
+    private volatile long lastSuccessfulDataAt;
+    private boolean noDataAlarmTriggered = false;
+    private boolean noFixAlarmTriggered = false;
 
     NmeaLoggerEngine(
             Context context,
@@ -50,13 +52,17 @@ final class NmeaLoggerEngine implements Runnable {
         this.address = address;
         this.deviceName = deviceName;
         this.sink = sink;
+        this.sessionStartAt = SystemClock.elapsedRealtime();
+        this.lastSuccessfulDataAt = sessionStartAt;
     }
 
     @Override
     public void run() {
         MutableNmeaStats mutableStats = new MutableNmeaStats(deviceName);
+        sessionStartAt = SystemClock.elapsedRealtime();
+        mutableStats.setSessionStartRealtimeMs(sessionStartAt);
         int reconnectDelayMs = 1000;
-        lastSuccessfulDataAt = SystemClock.elapsedRealtime();
+        lastSuccessfulDataAt = sessionStartAt;
 
         while (running.get()) {
             BluetoothSocket socket = null;
@@ -99,7 +105,7 @@ final class NmeaLoggerEngine implements Runnable {
                 mutableStats.setLastError(safeMessage(ex));
                 publish(mutableStats);
                 
-                checkAlarm();
+                checkAlarms(mutableStats);
                 
                 closeQuietly(logger);
                 closeQuietly(socket);
@@ -131,19 +137,27 @@ final class NmeaLoggerEngine implements Runnable {
         publish(mutableStats);
     }
 
-    void stop() {
+    @Override
+    public void stop() {
         running.set(false);
         closeQuietly(currentLogger);
         closeQuietly(currentSocket);
     }
 
-    private void checkAlarm() {
-        if (!alarmTriggered && running.get()) {
-            long now = SystemClock.elapsedRealtime();
-            if (now - lastSuccessfulDataAt > 30000) {
-                sink.onCriticalError("No GPS data for 30 seconds!");
-                alarmTriggered = true;
-            }
+    private void checkAlarms(MutableNmeaStats stats) {
+        if (!running.get()) return;
+        long now = SystemClock.elapsedRealtime();
+        
+        if (!noDataAlarmTriggered && (now - lastSuccessfulDataAt > 30000)) {
+            sink.onCriticalError("No GPS data for 30 seconds!");
+            noDataAlarmTriggered = true;
+        }
+
+        long lastFix = stats.getLastPositionRealtimeMs();
+        long fixReference = lastFix > 0 ? lastFix : sessionStartAt;
+        if (!noFixAlarmTriggered && fixReference > 0 && (now - fixReference > 30000)) {
+            sink.onCriticalError("No GPS Fix for over 30 seconds!");
+            noFixAlarmTriggered = true;
         }
     }
 
@@ -168,7 +182,7 @@ final class NmeaLoggerEngine implements Runnable {
 
             if (read > 0) {
                 lastSuccessfulDataAt = SystemClock.elapsedRealtime();
-                alarmTriggered = false;
+                noDataAlarmTriggered = false;
             }
 
             for (int i = 0; i < read; i++) {
@@ -208,6 +222,7 @@ final class NmeaLoggerEngine implements Runnable {
                 mutableStats.setCurrentFileName(logger.currentFileName());
                 mutableStats.setBytesWritten(logger.totalBytesWritten());
                 mutableStats.rollOneSecondWindow(now);
+                checkAlarms(mutableStats);
                 publish(mutableStats);
                 nextStatsAt = now + STATS_PERIOD_MS;
             }
@@ -226,6 +241,9 @@ final class NmeaLoggerEngine implements Runnable {
         mutableStats.incrementWindowSentences();
         mutableStats.setLastSentenceElapsedRealtimeMs(now);
         NmeaParser.parseForStats(line, length, mutableStats, now);
+        if (mutableStats.getLastPositionRealtimeMs() == now) {
+            noFixAlarmTriggered = false;
+        }
     }
 
     private void publish(MutableNmeaStats mutableStats) {

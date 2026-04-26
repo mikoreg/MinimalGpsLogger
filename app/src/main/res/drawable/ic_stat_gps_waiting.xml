@@ -1,17 +1,23 @@
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"
-    android:viewportWidth="512"
-    android:viewportHeight="512">
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- Stylized 'G' Polyline Path (Waiting) - Enlarged -->
     <path
-        android:fillColor="#2E7D32"
-        android:pathData="M256,256m-240,0a240,240 0,1 1,480,0a240,240 0,1 1,-480,0" />
-    <path
-        android:strokeColor="#FFFFFF"
-        android:strokeWidth="20"
+        android:pathData="M21,3 L3,3 L3,21 L21,21 L21,12 L12,12"
+        android:strokeColor="#FF000000"
+        android:strokeAlpha="0.6"
+        android:strokeWidth="3"
         android:strokeLineCap="round"
-        android:pathData="M140,350 L200,280 L280,320 L380,180" />
+        android:strokeLineJoin="round"/>
+    <!-- Large End Node -->
     <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M380,180m-35,0a35,35 0,1 1,70,0a35,35 0,1 1,-70,0" />
+        android:pathData="M12,12m-2.5,0a2.5,2.5 0,1 1,5 0a2.5,2.5 0,1 1,-5 0"
+        android:fillColor="#FF000000"
+        android:fillAlpha="0.6"/>
+    <!-- Status Symbol: Waiting (Blue Pause bars in bottom-left) -->
+    <path
+        android:pathData="M4.5,14 h2.5 v6 h-2.5 z M8.5,14 h2.5 v6 h-2.5 z"
+        android:fillColor="#FF1E88E5"/>
 </vector>

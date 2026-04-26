@@ -11,6 +11,7 @@ import android.content.Intent;
 import android.content.ServiceConnection;
 import android.content.pm.PackageManager;
 import android.graphics.Typeface;
+import android.location.LocationManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -24,6 +25,7 @@ import android.text.SpannableStringBuilder;
 import android.text.style.ForegroundColorSpan;
 import android.text.style.StyleSpan;
 import android.view.View;
+import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.Spinner;
@@ -32,6 +34,8 @@ import android.widget.Toast;
 
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowInsetsCompat;
 
 import org.jspecify.annotations.Nullable;
 
@@ -42,6 +46,7 @@ import java.io.IOException;
 import java.nio.channels.FileChannel;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 
 public final class MainActivity extends Activity {
@@ -59,8 +64,8 @@ public final class MainActivity extends Activity {
     private @Nullable TextView permissionText;
 
     private @Nullable TextView statusRow;
+    private @Nullable TextView connFixRow;
     private @Nullable TextView posRow;
-    private @Nullable TextView fileRow;
     private @Nullable TextView detailRow;
     private @Nullable TextView debugRow;
 
@@ -104,9 +109,22 @@ public final class MainActivity extends Activity {
     }
 
     private void initViews() {
+        View mainRoot = findViewById(R.id.mainRoot);
+        if (mainRoot != null) {
+            int pL = mainRoot.getPaddingLeft();
+            int pT = mainRoot.getPaddingTop();
+            int pR = mainRoot.getPaddingRight();
+            int pB = mainRoot.getPaddingBottom();
+            ViewCompat.setOnApplyWindowInsetsListener(mainRoot, (v, insets) -> {
+                androidx.core.graphics.Insets bars = insets.getInsets(WindowInsetsCompat.Type.systemBars());
+                v.setPadding(pL, pT + bars.top, pR, pB + bars.bottom);
+                return WindowInsetsCompat.CONSUMED;
+            });
+        }
+
         statusRow = findViewById(R.id.statusRow);
+        connFixRow = findViewById(R.id.connFixRow);
         posRow = findViewById(R.id.posRow);
-        fileRow = findViewById(R.id.fileRow);
         detailRow = findViewById(R.id.detailRow);
         debugRow = findViewById(R.id.debugRow);
 
@@ -119,20 +137,39 @@ public final class MainActivity extends Activity {
         deviceSpinner = findViewById(R.id.deviceSpinner);
         deviceAdapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, new ArrayList<DeviceListItem>());
         deviceAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
-        if (deviceSpinner != null) deviceSpinner.setAdapter(deviceAdapter);
+        if (deviceSpinner != null) {
+            deviceSpinner.setAdapter(deviceAdapter);
+            deviceSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+                @Override
+                public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                    refreshPermissionText();
+                }
+                @Override
+                public void onNothingSelected(AdapterView<?> parent) {
+                    refreshPermissionText();
+                }
+            });
+        }
 
         rateSpinner = findViewById(R.id.rateSpinner);
         distSpinner = findViewById(R.id.distSpinner);
         setupExportSpinners();
 
         findViewById(R.id.refreshBtn).setOnClickListener(v -> refreshBondedDevices());
-        findViewById(R.id.btSettingsBtn).setOnClickListener(v -> startActivity(new Intent(Settings.ACTION_BLUETOOTH_SETTINGS)));
+        findViewById(R.id.btSettingsBtn).setOnClickListener(v -> {
+            try {
+                startActivity(new Intent(Settings.ACTION_BLUETOOTH_SETTINGS));
+            } catch (Exception e) {
+                toast("Bluetooth settings not available.");
+            }
+        });
 
         if (startBtn != null) startBtn.setOnClickListener(v -> startLogging());
         if (stopBtn != null) stopBtn.setOnClickListener(v -> stopLogging());
         if (exportGpxBtn != null) exportGpxBtn.setOnClickListener(v -> exportToGpxWithNotification());
         
         permissionText = findViewById(R.id.permissionText);
+        refreshPermissionText();
         updateStatsUi(NmeaStats.idle());
     }
 
@@ -190,8 +227,13 @@ public final class MainActivity extends Activity {
         if (Build.VERSION.SDK_INT < 23) return;
 
         List<String> toRequest = new ArrayList<>();
-        if (Build.VERSION.SDK_INT >= 31 && ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
-            toRequest.add(Manifest.permission.BLUETOOTH_CONNECT);
+        if (Build.VERSION.SDK_INT >= 31) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
+                toRequest.add(Manifest.permission.BLUETOOTH_CONNECT);
+            }
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) != PackageManager.PERMISSION_GRANTED) {
+                toRequest.add(Manifest.permission.BLUETOOTH_SCAN);
+            }
         }
         if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             toRequest.add(Manifest.permission.POST_NOTIFICATIONS);
@@ -210,16 +252,33 @@ public final class MainActivity extends Activity {
 
     private boolean hasBluetoothConnectPermission() {
         if (Build.VERSION.SDK_INT < 31) return true;
-        return ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED;
+        boolean connectOk = ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED;
+        boolean scanOk = ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED;
+        return connectOk && scanOk;
+    }
+
+    private boolean hasFineLocationPermission() {
+        if (Build.VERSION.SDK_INT < 23) return true;
+        return ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED;
     }
 
     private void refreshPermissionText() {
         if (permissionText == null) return;
-        if (hasBluetoothConnectPermission()) {
-            permissionText.setText("BT Permission: OK");
+        boolean bluetoothOk = hasBluetoothConnectPermission();
+        boolean locationOk = hasFineLocationPermission();
+        
+        DeviceListItem selected = getSelectedDevice();
+        boolean internalSource = selected != null && GpsLoggerService.SOURCE_INTERNAL.equals(selected.address());
+        
+        boolean relevantPermissionsOk = internalSource ? locationOk : bluetoothOk;
+        if (relevantPermissionsOk) {
+            permissionText.setText("Permissions: OK");
             permissionText.setTextColor(0xFF888888);
         } else {
-            permissionText.setText("Missing BLUETOOTH_CONNECT permission!");
+            StringBuilder missing = new StringBuilder("Missing permission:");
+            if (!internalSource && !bluetoothOk) missing.append(" BLUETOOTH_CONNECT");
+            if (internalSource && !locationOk) missing.append(" ACCESS_FINE_LOCATION");
+            permissionText.setText(missing.toString());
             permissionText.setTextColor(0xFFFF0000);
         }
     }
@@ -227,46 +286,86 @@ public final class MainActivity extends Activity {
     private void refreshBondedDevices() {
         if (deviceAdapter == null) return;
         deviceAdapter.clear();
-        if (!hasBluetoothConnectPermission()) {
-            refreshPermissionText();
-            return;
-        }
-        BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
-        if (adapter == null) {
-            toast("No Bluetooth adapter.");
-            return;
-        }
-        if (!adapter.isEnabled()) toast("Bluetooth is OFF.");
-        try {
-            Set<BluetoothDevice> bonded = adapter.getBondedDevices();
-            for (BluetoothDevice device : bonded) {
-                String name = device.getName();
-                deviceAdapter.add(new DeviceListItem(name == null ? "Unknown" : name, device.getAddress()));
+        
+        deviceAdapter.add(new DeviceListItem("INTERNAL GPS (Built-in Chip)", GpsLoggerService.SOURCE_INTERNAL));
+        deviceAdapter.add(new DeviceListItem("USB GPS (Not supported yet)", "usb"));
+        
+        if (hasBluetoothConnectPermission()) {
+            BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
+            if (adapter != null && adapter.isEnabled()) {
+                try {
+                    Set<BluetoothDevice> bonded = adapter.getBondedDevices();
+                    for (BluetoothDevice device : bonded) {
+                        String name = device.getName();
+                        deviceAdapter.add(new DeviceListItem("BT: " + (name == null ? "Unknown" : name), device.getAddress()));
+                    }
+                } catch (SecurityException ignored) {}
             }
-            deviceAdapter.notifyDataSetChanged();
-        } catch (SecurityException ex) {
-            toast("Permission issue accessing devices.");
         }
+        deviceAdapter.notifyDataSetChanged();
+        refreshPermissionText();
+    }
+
+    private @Nullable DeviceListItem getSelectedDevice() {
+        if (deviceSpinner == null || deviceSpinner.getSelectedItem() == null) return null;
+        return (DeviceListItem) deviceSpinner.getSelectedItem();
     }
 
     private void startLogging() {
-        if (!hasBluetoothConnectPermission()) {
+        DeviceListItem selected = getSelectedDevice();
+        if (selected == null) {
+            toast("Select a GPS source first.");
+            return;
+        }
+        
+        String sourceType = GpsLoggerService.SOURCE_INTERNAL.equals(selected.address()) 
+                ? GpsLoggerService.SOURCE_INTERNAL 
+                : GpsLoggerService.SOURCE_BLUETOOTH;
+                
+        if ("usb".equals(selected.address())) {
+            toast("USB GPS is not implemented yet.");
+            return;
+        }
+
+        if (GpsLoggerService.SOURCE_BLUETOOTH.equals(sourceType) && !hasBluetoothConnectPermission()) {
             requestRuntimePermissionsIfNeeded();
             return;
         }
-        if (deviceSpinner == null || deviceSpinner.getSelectedItem() == null) {
-            toast("Select a GPS device first.");
+        if (GpsLoggerService.SOURCE_INTERNAL.equals(sourceType) && !hasFineLocationPermission()) {
+            requestRuntimePermissionsIfNeeded();
             return;
         }
-        DeviceListItem item = (DeviceListItem) deviceSpinner.getSelectedItem();
+        if (GpsLoggerService.SOURCE_INTERNAL.equals(sourceType) && !isGpsProviderEnabled()) {
+            toast("Turn on GPS/location in Android settings.");
+            try {
+                startActivity(new Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS));
+            } catch (Exception e) {
+                toast("Location settings not available.");
+            }
+            return;
+        }
+
         Intent intent = new Intent(this, GpsLoggerService.class);
         intent.setAction(GpsLoggerService.ACTION_START);
-        intent.putExtra(GpsLoggerService.EXTRA_DEVICE_ADDRESS, item.address());
-        intent.putExtra(GpsLoggerService.EXTRA_DEVICE_NAME, item.name());
+        intent.putExtra(GpsLoggerService.EXTRA_SOURCE_TYPE, sourceType);
+        if (GpsLoggerService.SOURCE_BLUETOOTH.equals(sourceType)) {
+            intent.putExtra(GpsLoggerService.EXTRA_DEVICE_ADDRESS, selected.address());
+            intent.putExtra(GpsLoggerService.EXTRA_DEVICE_NAME, selected.name());
+        }
         if (Build.VERSION.SDK_INT >= 26) {
             startForegroundService(intent);
         } else {
             startService(intent);
+        }
+    }
+
+    private boolean isGpsProviderEnabled() {
+        LocationManager lm = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
+        if (lm == null) return false;
+        try {
+            return lm.isProviderEnabled(LocationManager.GPS_PROVIDER);
+        } catch (RuntimeException ex) {
+            return false;
         }
     }
 
@@ -283,7 +382,7 @@ public final class MainActivity extends Activity {
     }
 
     private void updateStatsUi(NmeaStats stats) {
-        if (statusRow == null || posRow == null || fileRow == null || detailRow == null || debugRow == null) return;
+        if (statusRow == null || connFixRow == null || posRow == null || detailRow == null || debugRow == null) return;
 
         String state = stats.state();
         boolean isWorking = !"IDLE".equals(state) && !"STOPPED".equals(state);
@@ -297,61 +396,71 @@ public final class MainActivity extends Activity {
             stopBtn.setAlpha(isWorking ? 1.0f : 0.4f);
         }
 
-        SpannableStringBuilder sb1 = new SpannableStringBuilder();
+        long now = SystemClock.elapsedRealtime();
+        long lastData = stats.lastDataRealtimeMs();
+        long lastFix = stats.lastPositionRealtimeMs();
+        long sessionStart = stats.sessionStartRealtimeMs();
+
+        // --- LINE 1: STATUS & PANICS ---
+        SpannableStringBuilder sbStatus = new SpannableStringBuilder();
         String stateSymbol = "[ ]";
-        int stateColor = 0xFF757575;
+        int stateColor = 0xFF000000; // Black
         if ("LOGGING".equals(state)) {
             stateSymbol = "[ACTIVE]";
-            stateColor = 0xFF2E7D32;
+            stateColor = 0xFF2E7D32; // Green
         } else if ("ERROR".equals(state)) {
             stateSymbol = "[ERR]";
-            stateColor = 0xFFC62828;
+            stateColor = 0xFFC62828; // Red
         } else if ("RECONNECTING".equals(state) || "CONNECTING".equals(state)) {
             stateSymbol = "[TRYING]";
-            stateColor = 0xFFF57C00;
+            stateColor = 0xFFF57C00; // Orange
         }
         
-        sb1.append(stateSymbol).append(" ").append(state);
-        sb1.setSpan(new ForegroundColorSpan(stateColor), 0, sb1.length(), 0);
-        sb1.setSpan(new StyleSpan(Typeface.BOLD), 0, sb1.length(), 0);
-        
+        sbStatus.append(stateSymbol).append(" ").append(state);
+        sbStatus.setSpan(new ForegroundColorSpan(stateColor), 0, sbStatus.length(), 0);
+        sbStatus.setSpan(new StyleSpan(Typeface.BOLD), 0, sbStatus.length(), 0);
+
         if (isWorking) {
-            long now = SystemClock.elapsedRealtime();
-            long lastData = stats.lastDataRealtimeMs();
-            long lastFix = stats.lastPositionRealtimeMs();
+            // Data Panic
             if (lastData > 0) {
-                long diffMs = now - lastData;
-                if (diffMs > 2000) {
-                    long remainingSec = Math.max(0, 30 - (diffMs / 1000));
-                    sb1.append(" (DATA PANIC IN ").append(String.valueOf(remainingSec)).append("s!)");
+                long dataDiffMs = now - lastData;
+                if (dataDiffMs > 2000) {
+                    long rem = Math.max(0, 30 - (dataDiffMs / 1000));
+                    int start = sbStatus.length();
+                    sbStatus.append(" (DATA PANIC IN ").append(String.valueOf(rem)).append("s!)");
+                    sbStatus.setSpan(new ForegroundColorSpan(0xFFC62828), start, sbStatus.length(), 0);
                 }
             }
-            if (lastData > 0 && (now - lastData < 5000)) {
-                if (lastFix > 0) {
-                    long fixDiffMs = now - lastFix;
-                    if (fixDiffMs > 10000) {
-                        long remainingFix = Math.max(0, 30 - (fixDiffMs / 1000));
-                        sb1.append(" (FIX PANIC IN ").append(String.valueOf(remainingFix)).append("s!)");
-                    }
-                } else {
-                    long sinceStart = now - lastData;
-                    if (sinceStart > 30000) {
-                         long remainingFirstFix = Math.max(0, 60 - (sinceStart / 1000));
-                         sb1.append(" (NO FIX PANIC IN ").append(String.valueOf(remainingFirstFix)).append("s!)");
-                    }
+            // Fix Panic
+            long fixReference = lastFix > 0 ? lastFix : sessionStart;
+            if (fixReference > 0) {
+                long fixDiffMs = now - fixReference;
+                if (fixDiffMs > 5000) {
+                    long rem = Math.max(0, 30 - (fixDiffMs / 1000));
+                    int start = sbStatus.length();
+                    String label = lastFix > 0 ? "FIX PANIC" : "NO FIX PANIC";
+                    sbStatus.append(" (").append(label).append(" IN ").append(String.valueOf(rem)).append("s!)");
+                    sbStatus.setSpan(new ForegroundColorSpan(0xFFC62828), start, sbStatus.length(), 0);
                 }
             }
         }
+        statusRow.setText(sbStatus);
 
-        sb1.append(" | CONN: ").append(stats.connected() ? "OK" : "--");
-        int fixStart = sb1.length();
-        sb1.append(" | FIX: ").append(stats.fixValid() ? "YES" : "NO");
-        if (stats.fixValid()) {
-            sb1.setSpan(new ForegroundColorSpan(0xFF1565C0), fixStart + 8, sb1.length(), 0);
-        }
-        statusRow.setText(sb1);
+        // --- LINE 2: CONN & FIX ---
+        SpannableStringBuilder sbConnFix = new SpannableStringBuilder();
+        sbConnFix.append("CONN: ");
+        int connStart = sbConnFix.length();
+        sbConnFix.append(stats.connected() ? "OK" : "--");
+        sbConnFix.setSpan(new ForegroundColorSpan(stats.connected() ? 0xFF2E7D32 : 0xFFC62828), connStart, sbConnFix.length(), 0);
+        
+        sbConnFix.append(" | FIX: ");
+        int fixStatusStart = sbConnFix.length();
+        sbConnFix.append(stats.fixValid() ? "YES" : "NO");
+        sbConnFix.setSpan(new ForegroundColorSpan(stats.fixValid() ? 0xFF2E7D32 : 0xFFC62828), fixStatusStart, sbConnFix.length(), 0);
+        connFixRow.setText(sbConnFix);
 
-        posRow.setText(String.format("LAT: %s, LON: %s", 
+        // --- LINE 3: LAT/LON ---
+        posRow.setText(String.format("LAT:%s LON:%s",
                 stats.formatDouble(stats.latitude(), 6), 
                 stats.formatDouble(stats.longitude(), 6)));
 
@@ -363,30 +472,37 @@ public final class MainActivity extends Activity {
             }
         }
 
+        // --- LINE 4: ALT/SPD/CRS ---
         detailRow.setText(String.format("ALT: %s m | SPD: %s km/h | CRS: %s", 
                 stats.formatDouble(stats.altitudeMeters(), 1),
                 stats.formatDouble(stats.speedKmh(), 1),
                 stats.formatDouble(stats.courseDegrees(), 0)));
 
+        // --- LINE 5: TIME | SIZE ---
+        StringBuilder sbStats = new StringBuilder();
+        if (sessionStart > 0 && isWorking) {
+            long durationSec = (now - sessionStart) / 1000;
+            long h = durationSec / 3600;
+            long m = (durationSec % 3600) / 60;
+            long s = durationSec % 60;
+            sbStats.append(String.format(Locale.US, "TIME: %02d:%02d:%02d | ", h, m, s));
+        } else {
+            sbStats.append("TIME: --:--:-- | ");
+        }
+        
         String path = stats.currentFileName();
         if (!path.isEmpty()) {
             lastLogFile = path;
-            if (path.contains("/")) path = path.substring(path.lastIndexOf('/') + 1);
-            fileRow.setText("FILE: " + path + " (" + stats.formatBytes(stats.bytesWritten()) + ")");
+            sbStats.append("LOG SIZE: ").append(stats.formatBytes(stats.bytesWritten()));
         } else {
-            fileRow.setText("FILE: (none)");
+            sbStats.append("LOG SIZE: 0 B");
         }
+        debugRow.setText(sbStats.toString());
 
         // Show/Hide export area
         if (exportOptionsContainer != null) {
             exportOptionsContainer.setVisibility(!isWorking && !lastLogFile.isEmpty() ? View.VISIBLE : View.GONE);
         }
-
-        debugRow.setText(String.format("Sats: %s/%s  HDOP: %s  Rate: %s",
-                stats.formatInt(stats.satellitesUsed()),
-                stats.formatInt(stats.satellitesVisible()),
-                stats.formatDouble(stats.hdop(), 1),
-                stats.formatDouble(stats.nmeaSentencesPerSecond(), 1) + "/s"));
     }
 
     private void openMap(double lat, double lon) {
@@ -463,7 +579,7 @@ public final class MainActivity extends Activity {
         DeviceListItem(String name, String address) { this.name = name; this.address = address; }
         String name() { return name; }
         String address() { return address; }
-        @Override public String toString() { return name + " (" + address + ")"; }
+        @Override public String toString() { return name; }
     }
 
     private static final class ExportRate {
