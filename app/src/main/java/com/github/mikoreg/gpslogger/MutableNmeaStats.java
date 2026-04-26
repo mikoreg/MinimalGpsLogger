@@ -188,18 +188,11 @@ final class MutableNmeaStats {
 
     NmeaStats snapshot(long now) {
         long age = lastSentenceElapsedRealtimeMs < 0 ? -1L : now - lastSentenceElapsedRealtimeMs;
-        
-        boolean hasCoordinates = !Double.isNaN(latitude) && !Double.isNaN(longitude);
-        // Fix is valid only if connected AND has recent data (within 10s)
-        boolean uiFixValid = connected && fixValid && hasCoordinates && (age >= 0 && age < 10000);
-        
-        // Frequency is 0 if not connected or no recent data
-        double uiFreq = (connected && age >= 0 && age < 3000) ? nmeaSentencesPerSecond : 0.0;
 
         return new NmeaStats(
-                state, deviceName, currentFileName, lastError, connected, uiFixValid,
+                state, deviceName, currentFileName, lastError, connected, fixValid,
                 latitude, longitude, altitudeMeters, speedKmh, courseDegrees,
-                hdop, vdop, pdop, uiFreq,
+                hdop, vdop, pdop, nmeaSentencesPerSecond,
                 fixQuality, gsaFixType, satellitesUsed, satellitesVisible,
                 bytesWritten, sentencesTotal, checksumErrors, parseErrors, tooLongLines, reconnects,
                 age, lastDataRealtimeMs, lastPositionRealtimeMs, utcTimestampMs,

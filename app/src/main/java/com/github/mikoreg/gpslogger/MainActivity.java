@@ -432,6 +432,11 @@ public final class MainActivity extends Activity {
         long lastData = stats.lastDataRealtimeMs();
         long lastFix = stats.lastPositionRealtimeMs();
         long sessionStart = stats.sessionStartRealtimeMs();
+        long age = stats.lastSentenceAgeMs();
+
+        boolean dataIsFresh = stats.connected() && age >= 0 && age < 3000;
+        boolean fixIsFresh = stats.connected() && age >= 0 && age < 10000;
+        boolean uiFixValid = stats.fixValid() && fixIsFresh;
 
         // --- LINE 1: STATUS & PANICS ---
         SpannableStringBuilder sbStatus = new SpannableStringBuilder();
@@ -487,8 +492,8 @@ public final class MainActivity extends Activity {
         
         sbConnFix.append(" | FIX: ");
         int fixStatusStart = sbConnFix.length();
-        sbConnFix.append(stats.fixValid() ? "YES" : "NO");
-        sbConnFix.setSpan(new ForegroundColorSpan(stats.fixValid() ? 0xFF2E7D32 : 0xFFC62828), fixStatusStart, sbConnFix.length(), 0);
+        sbConnFix.append(uiFixValid ? "YES" : "NO");
+        sbConnFix.setSpan(new ForegroundColorSpan(uiFixValid ? 0xFF2E7D32 : 0xFFC62828), fixStatusStart, sbConnFix.length(), 0);
         connFixRow.setText(sbConnFix);
 
         // --- LINE 3: LAT/LON ---
@@ -497,9 +502,8 @@ public final class MainActivity extends Activity {
                 stats.formatDouble(stats.longitude(), 6)));
 
         if (openMapBtn != null) {
-            boolean hasFix = stats.fixValid();
-            openMapBtn.setVisibility(hasFix ? View.VISIBLE : View.GONE);
-            if (hasFix) {
+            openMapBtn.setVisibility(uiFixValid ? View.VISIBLE : View.GONE);
+            if (uiFixValid) {
                 openMapBtn.setOnClickListener(v -> openMap(stats.latitude(), stats.longitude()));
             }
         }
@@ -522,8 +526,9 @@ public final class MainActivity extends Activity {
             sbStats.append("TIME: --:--:-- | ");
         }
 
+        double displayFreq = dataIsFresh ? stats.nmeaSentencesPerSecond() : 0.0;
         sbStats.append(String.format(Locale.US, "FREQ: %s Hz | ",
-                stats.formatDouble(stats.nmeaSentencesPerSecond(), 1)));
+                stats.formatDouble(displayFreq, 1)));
         
         String path = stats.currentFileName();
         if (!path.isEmpty()) {
