@@ -27,6 +27,7 @@ final class MutableNmeaStats {
     private long bytesWritten;
     private long sentencesTotal;
     private long sentencesInWindow;
+    private long fixesInWindow;
     private long checksumErrors;
     private long parseErrors;
     private long tooLongLines;
@@ -68,6 +69,7 @@ final class MutableNmeaStats {
         this.latitude = latitude;
         this.longitude = longitude;
         this.lastPositionRealtimeMs = now;
+        this.fixesInWindow++;
     }
 
     void setAltitudeMeters(double altitudeMeters) {
@@ -170,14 +172,17 @@ final class MutableNmeaStats {
         if (windowStartRealtimeMs < 0) {
             windowStartRealtimeMs = now;
             sentencesInWindow = 0;
+            fixesInWindow = 0;
             return;
         }
 
         long elapsed = now - windowStartRealtimeMs;
-        if (elapsed >= 1000) {
-            nmeaSentencesPerSecond = (sentencesInWindow * 1000.0d) / elapsed;
+        // Window increased to 10 seconds for better averaging
+        if (elapsed >= 10000) {
+            nmeaSentencesPerSecond = (fixesInWindow * 1000.0d) / elapsed;
             windowStartRealtimeMs = now;
             sentencesInWindow = 0;
+            fixesInWindow = 0;
         }
     }
 
@@ -185,12 +190,16 @@ final class MutableNmeaStats {
         long age = lastSentenceElapsedRealtimeMs < 0 ? -1L : now - lastSentenceElapsedRealtimeMs;
         
         boolean hasCoordinates = !Double.isNaN(latitude) && !Double.isNaN(longitude);
-        boolean uiFixValid = fixValid && hasCoordinates;
+        // Fix is valid only if connected AND has recent data (within 10s)
+        boolean uiFixValid = connected && fixValid && hasCoordinates && (age >= 0 && age < 10000);
+        
+        // Frequency is 0 if not connected or no recent data
+        double uiFreq = (connected && age >= 0 && age < 3000) ? nmeaSentencesPerSecond : 0.0;
 
         return new NmeaStats(
                 state, deviceName, currentFileName, lastError, connected, uiFixValid,
                 latitude, longitude, altitudeMeters, speedKmh, courseDegrees,
-                hdop, vdop, pdop, nmeaSentencesPerSecond,
+                hdop, vdop, pdop, uiFreq,
                 fixQuality, gsaFixType, satellitesUsed, satellitesVisible,
                 bytesWritten, sentencesTotal, checksumErrors, parseErrors, tooLongLines, reconnects,
                 age, lastDataRealtimeMs, lastPositionRealtimeMs, utcTimestampMs,

@@ -2,6 +2,7 @@ package com.github.mikoreg.gpslogger;
 
 import android.Manifest;
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.app.DownloadManager;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
@@ -24,16 +25,21 @@ import android.provider.Settings;
 import android.text.SpannableStringBuilder;
 import android.text.style.ForegroundColorSpan;
 import android.text.style.StyleSpan;
+import android.view.LayoutInflater;
 import android.view.View;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
+import android.widget.CheckBox;
+import android.widget.ImageButton;
+import android.widget.LinearLayout;
 import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
+import androidx.core.content.FileProvider;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
 
@@ -44,13 +50,18 @@ import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.channels.FileChannel;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Date;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 
 public final class MainActivity extends Activity {
     private static final int REQUEST_ALL = 1000;
+    private static final int INITIAL_LOAD_LIMIT = 20;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
 
@@ -61,7 +72,6 @@ public final class MainActivity extends Activity {
     private @Nullable View exportOptionsContainer;
     private @Nullable Spinner rateSpinner;
     private @Nullable Spinner distSpinner;
-    private @Nullable TextView permissionText;
 
     private @Nullable TextView statusRow;
     private @Nullable TextView connFixRow;
@@ -74,6 +84,17 @@ public final class MainActivity extends Activity {
     private @Nullable Button exportGpxBtn;
     private @Nullable Button openMapBtn;
 
+    // History elements
+    private @Nullable LinearLayout historyContainer;
+    private @Nullable Button loadMoreBtn;
+    private @Nullable View historyActions;
+    private @Nullable CheckBox historySelectAll;
+    
+    private final List<File> logFiles = new ArrayList<>();
+    private final Set<File> selectedFiles = new HashSet<>();
+    private int loadLimit = INITIAL_LOAD_LIMIT;
+
+    private boolean wasLogging = false;
     private String lastLogFile = "";
 
     private final Runnable uiRefreshRunnable = new Runnable() {
@@ -106,6 +127,7 @@ public final class MainActivity extends Activity {
             requestRuntimePermissionsIfNeeded();
         }
         refreshBondedDevices();
+        refreshHistory();
     }
 
     private void initViews() {
@@ -139,16 +161,6 @@ public final class MainActivity extends Activity {
         deviceAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
         if (deviceSpinner != null) {
             deviceSpinner.setAdapter(deviceAdapter);
-            deviceSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
-                @Override
-                public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
-                    refreshPermissionText();
-                }
-                @Override
-                public void onNothingSelected(AdapterView<?> parent) {
-                    refreshPermissionText();
-                }
-            });
         }
 
         rateSpinner = findViewById(R.id.rateSpinner);
@@ -167,9 +179,25 @@ public final class MainActivity extends Activity {
         if (startBtn != null) startBtn.setOnClickListener(v -> startLogging());
         if (stopBtn != null) stopBtn.setOnClickListener(v -> stopLogging());
         if (exportGpxBtn != null) exportGpxBtn.setOnClickListener(v -> exportToGpxWithNotification());
+
+        // History Init
+        historyContainer = findViewById(R.id.historyContainer);
+        loadMoreBtn = findViewById(R.id.loadMoreBtn);
+        historyActions = findViewById(R.id.historyActions);
+        historySelectAll = findViewById(R.id.historySelectAll);
+
+        if (loadMoreBtn != null) loadMoreBtn.setOnClickListener(v -> {
+            loadLimit += 20;
+            renderHistoryItems();
+        });
+        if (historySelectAll != null) historySelectAll.setOnCheckedChangeListener((v, checked) -> {
+            selectedFiles.clear();
+            if (checked) selectedFiles.addAll(logFiles);
+            renderHistoryItems();
+        });
+        findViewById(R.id.historyExportBtn).setOnClickListener(v -> exportSelectedLogs());
+        findViewById(R.id.historyDeleteBtn).setOnClickListener(v -> confirmDeleteLogs());
         
-        permissionText = findViewById(R.id.permissionText);
-        refreshPermissionText();
         updateStatsUi(NmeaStats.idle());
     }
 
@@ -204,6 +232,7 @@ public final class MainActivity extends Activity {
         Intent intent = new Intent(this, GpsLoggerService.class);
         bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE);
         handler.post(uiRefreshRunnable);
+        refreshHistory();
     }
 
     @Override
@@ -220,7 +249,6 @@ public final class MainActivity extends Activity {
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         refreshBondedDevices();
-        refreshPermissionText();
     }
 
     private void requestRuntimePermissionsIfNeeded() {
@@ -262,27 +290,6 @@ public final class MainActivity extends Activity {
         return ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED;
     }
 
-    private void refreshPermissionText() {
-        if (permissionText == null) return;
-        boolean bluetoothOk = hasBluetoothConnectPermission();
-        boolean locationOk = hasFineLocationPermission();
-        
-        DeviceListItem selected = getSelectedDevice();
-        boolean internalSource = selected != null && GpsLoggerService.SOURCE_INTERNAL.equals(selected.address());
-        
-        boolean relevantPermissionsOk = internalSource ? locationOk : bluetoothOk;
-        if (relevantPermissionsOk) {
-            permissionText.setText("Permissions: OK");
-            permissionText.setTextColor(0xFF888888);
-        } else {
-            StringBuilder missing = new StringBuilder("Missing permission:");
-            if (!internalSource && !bluetoothOk) missing.append(" BLUETOOTH_CONNECT");
-            if (internalSource && !locationOk) missing.append(" ACCESS_FINE_LOCATION");
-            permissionText.setText(missing.toString());
-            permissionText.setTextColor(0xFFFF0000);
-        }
-    }
-
     private void refreshBondedDevices() {
         if (deviceAdapter == null) return;
         deviceAdapter.clear();
@@ -303,7 +310,6 @@ public final class MainActivity extends Activity {
             }
         }
         deviceAdapter.notifyDataSetChanged();
-        refreshPermissionText();
     }
 
     private @Nullable DeviceListItem getSelectedDevice() {
@@ -327,14 +333,24 @@ public final class MainActivity extends Activity {
             return;
         }
 
-        if (GpsLoggerService.SOURCE_BLUETOOTH.equals(sourceType) && !hasBluetoothConnectPermission()) {
-            requestRuntimePermissionsIfNeeded();
+        // Check permissions and alert if missing
+        boolean bluetoothMissing = GpsLoggerService.SOURCE_BLUETOOTH.equals(sourceType) && !hasBluetoothConnectPermission();
+        boolean locationMissing = GpsLoggerService.SOURCE_INTERNAL.equals(sourceType) && !hasFineLocationPermission();
+
+        if (bluetoothMissing || locationMissing) {
+            new AlertDialog.Builder(this)
+                .setTitle("Permissions missing")
+                .setMessage("Required permissions for " + sourceType + " source are missing. Please allow them in settings.")
+                .setPositiveButton("Settings", (d, w) -> {
+                    Intent intent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
+                    intent.setData(Uri.fromParts("package", getPackageName(), null));
+                    startActivity(intent);
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
             return;
         }
-        if (GpsLoggerService.SOURCE_INTERNAL.equals(sourceType) && !hasFineLocationPermission()) {
-            requestRuntimePermissionsIfNeeded();
-            return;
-        }
+
         if (GpsLoggerService.SOURCE_INTERNAL.equals(sourceType) && !isGpsProviderEnabled()) {
             toast("Turn on GPS/location in Android settings.");
             try {
@@ -386,6 +402,22 @@ public final class MainActivity extends Activity {
 
         String state = stats.state();
         boolean isWorking = !"IDLE".equals(state) && !"STOPPED".equals(state);
+
+        if (!isWorking && wasLogging) {
+            wasLogging = false;
+            refreshHistory();
+            // Automatically select the most recent file after logging stops
+            if (!logFiles.isEmpty()) {
+                File latest = logFiles.get(0);
+                lastLogFile = latest.getAbsolutePath();
+                selectedFiles.add(latest);
+                renderHistoryItems();
+                updateExportButtonState(false);
+            }
+        }
+        if (isWorking) {
+            wasLogging = true;
+        }
 
         if (startBtn != null) {
             startBtn.setEnabled(!isWorking);
@@ -489,19 +521,39 @@ public final class MainActivity extends Activity {
         } else {
             sbStats.append("TIME: --:--:-- | ");
         }
+
+        sbStats.append(String.format(Locale.US, "FREQ: %s Hz | ",
+                stats.formatDouble(stats.nmeaSentencesPerSecond(), 1)));
         
         String path = stats.currentFileName();
         if (!path.isEmpty()) {
-            lastLogFile = path;
             sbStats.append("LOG SIZE: ").append(stats.formatBytes(stats.bytesWritten()));
         } else {
             sbStats.append("LOG SIZE: 0 B");
         }
         debugRow.setText(sbStats.toString());
 
-        // Show/Hide export area
+        // Show/Hide export area permanently if files exist
         if (exportOptionsContainer != null) {
-            exportOptionsContainer.setVisibility(!isWorking && !lastLogFile.isEmpty() ? View.VISIBLE : View.GONE);
+            exportOptionsContainer.setVisibility(!logFiles.isEmpty() ? View.VISIBLE : View.GONE);
+        }
+        updateExportButtonState(isWorking);
+    }
+
+    private void updateExportButtonState(boolean isWorking) {
+        if (exportGpxBtn != null) {
+            boolean hasSelected = !lastLogFile.isEmpty();
+            boolean canExport = hasSelected && !isWorking;
+            exportGpxBtn.setEnabled(canExport);
+            if (canExport) {
+                exportGpxBtn.setAlpha(1.0f);
+                exportGpxBtn.setBackgroundColor(0xFF0097A7); // Turquoise/Cyan 700
+                exportGpxBtn.setTextColor(0xFFFFFFFF);
+            } else {
+                exportGpxBtn.setAlpha(0.4f);
+                exportGpxBtn.setBackgroundColor(0xFFBBBBBB); // Gray
+                exportGpxBtn.setTextColor(0xFF888888);
+            }
         }
     }
 
@@ -516,7 +568,10 @@ public final class MainActivity extends Activity {
     }
 
     private void exportToGpxWithNotification() {
-        if (lastLogFile.isEmpty()) return;
+        if (lastLogFile.isEmpty()) {
+            toast("No file selected for export.");
+            return;
+        }
         File nmea = new File(lastLogFile);
         if (!nmea.exists()) {
             toast("Source file missing.");
@@ -534,25 +589,7 @@ public final class MainActivity extends Activity {
 
         try {
             File gpxInternal = NmeaToGpx.convert(nmea, intervalMs, minDist);
-            File downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
-            if (!downloadsDir.exists() && !downloadsDir.mkdirs()) {
-                toast("Could not create Downloads directory.");
-                return;
-            }
-            File gpxExternal = new File(downloadsDir, gpxInternal.getName());
-            copyFile(gpxInternal, gpxExternal);
-
-            DownloadManager dm = (DownloadManager) getSystemService(Context.DOWNLOAD_SERVICE);
-            if (dm != null) {
-                dm.addCompletedDownload(
-                        gpxExternal.getName(),
-                        "GPS Track Log",
-                        true,
-                        "application/gpx+xml",
-                        gpxExternal.getAbsolutePath(),
-                        gpxExternal.length(),
-                        true
-                );
+            if (copyToDownloads(gpxInternal, "application/gpx+xml")) {
                 toast("GPX exported to Downloads folder!");
             }
         } catch (Exception e) {
@@ -560,12 +597,161 @@ public final class MainActivity extends Activity {
         }
     }
 
-    private void copyFile(File src, File dst) throws IOException {
-        try (FileInputStream fis = new FileInputStream(src);
-             FileOutputStream fos = new FileOutputStream(dst);
-             FileChannel inChannel = fis.getChannel();
-             FileChannel outChannel = fos.getChannel()) {
-            inChannel.transferTo(0, inChannel.size(), outChannel);
+    // --- HISTORY LOGIC ---
+
+    private void refreshHistory() {
+        File base = getExternalFilesDir(null);
+        if (base == null) base = getFilesDir();
+        File tracksDir = new File(base, "tracks");
+
+        logFiles.clear();
+        selectedFiles.clear();
+        if (tracksDir.exists() && tracksDir.isDirectory()) {
+            File[] files = tracksDir.listFiles((dir, name) -> name.endsWith(".nmea"));
+            if (files != null) {
+                Arrays.sort(files, (f1, f2) -> Long.compare(f2.lastModified(), f1.lastModified()));
+                logFiles.addAll(Arrays.asList(files));
+            }
+        }
+        renderHistoryItems();
+    }
+
+    private void renderHistoryItems() {
+        if (historyContainer == null) return;
+        historyContainer.removeAllViews();
+        
+        LayoutInflater inflater = LayoutInflater.from(this);
+        SimpleDateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US);
+        
+        int count = Math.min(logFiles.size(), loadLimit);
+        for (int i = 0; i < count; i++) {
+            File file = logFiles.get(i);
+            View row = inflater.inflate(R.layout.log_item, historyContainer, false);
+            
+            CheckBox cb = row.findViewById(R.id.logCheckBox);
+            TextView name = row.findViewById(R.id.logFileName);
+            TextView info = row.findViewById(R.id.logFileInfo);
+            ImageButton share = row.findViewById(R.id.shareBtn);
+            
+            name.setText(file.getName());
+            info.setText(String.format(Locale.US, "%s | %.1f KB", 
+                    dateFormat.format(new Date(file.lastModified())),
+                    file.length() / 1024.0));
+            
+            cb.setChecked(selectedFiles.contains(file));
+            cb.setOnCheckedChangeListener((v, checked) -> {
+                if (checked) selectedFiles.add(file); else selectedFiles.remove(file);
+                updateHistoryActionsVisibility();
+            });
+            
+            // Selection logic for GPX export
+            if (file.getAbsolutePath().equals(lastLogFile)) {
+                row.setBackgroundColor(0x15000000); // Light highlight
+            } else {
+                row.setBackgroundColor(0x00000000);
+            }
+
+            row.setOnClickListener(v -> {
+                android.util.Log.d("GPSLogger", "Row clicked: " + file.getName());
+                if (file.getAbsolutePath().equals(lastLogFile)) {
+                    lastLogFile = ""; // Deselect if already selected
+                    selectedFiles.remove(file); // Also uncheck the checkbox
+                } else {
+                    lastLogFile = file.getAbsolutePath();
+                    selectedFiles.add(file); // Also check the checkbox
+                }
+                android.util.Log.d("GPSLogger", "New lastLogFile: " + lastLogFile);
+                renderHistoryItems(); // Re-render to show selection highlight and checkbox state
+                GpsLoggerService service = boundService;
+                boolean isWorking = service != null && !"IDLE".equals(service.stats().state()) && !"STOPPED".equals(service.stats().state());
+                updateExportButtonState(isWorking);
+            });
+
+            // Ensure views inside the row don't consume the click
+            cb.setFocusable(false);
+            cb.setClickable(false);
+            
+            // Allow share to be clicked independently
+            share.setOnClickListener(v -> {
+                android.util.Log.d("GPSLogger", "Share clicked: " + file.getName());
+                shareFile(file);
+            });
+            
+            historyContainer.addView(row);
+        }
+        
+        if (loadMoreBtn != null) {
+            loadMoreBtn.setVisibility(logFiles.size() > loadLimit ? View.VISIBLE : View.GONE);
+        }
+        updateHistoryActionsVisibility();
+    }
+
+    private void updateHistoryActionsVisibility() {
+        if (historyActions != null) {
+            historyActions.setVisibility(selectedFiles.isEmpty() ? View.GONE : View.VISIBLE);
+        }
+    }
+
+    private void exportSelectedLogs() {
+        int success = 0;
+        for (File f : selectedFiles) {
+            if (copyToDownloads(f, "application/octet-stream")) success++;
+        }
+        toast("Exported " + success + " logs to Downloads.");
+        selectedFiles.clear();
+        if (historySelectAll != null) historySelectAll.setChecked(false);
+        renderHistoryItems();
+    }
+
+    private void confirmDeleteLogs() {
+        new AlertDialog.Builder(this)
+                .setTitle("Delete Logs")
+                .setMessage("Delete " + selectedFiles.size() + " files?")
+                .setPositiveButton("Delete", (d, w) -> {
+                    for (File f : selectedFiles) {
+                        if (f.getAbsolutePath().equals(lastLogFile)) lastLogFile = "";
+                        //noinspection ResultOfMethodCallIgnored
+                        f.delete();
+                    }
+                    refreshHistory();
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    private void shareFile(File file) {
+        try {
+            Uri uri = FileProvider.getUriForFile(this, getPackageName() + ".fileprovider", file);
+            Intent intent = new Intent(Intent.ACTION_SEND);
+            intent.setType("application/octet-stream");
+            intent.putExtra(Intent.EXTRA_STREAM, uri);
+            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            startActivity(Intent.createChooser(intent, "Share NMEA Log"));
+        } catch (Exception e) {
+            toast("Share failed: " + e.getMessage());
+        }
+    }
+
+    private boolean copyToDownloads(File src, String mimeType) {
+        try {
+            File downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
+            if (!downloadsDir.exists() && !downloadsDir.mkdirs()) return false;
+            File dst = new File(downloadsDir, src.getName());
+            
+            try (FileInputStream fis = new FileInputStream(src);
+                 FileOutputStream fos = new FileOutputStream(dst);
+                 FileChannel inChannel = fis.getChannel();
+                 FileChannel outChannel = fos.getChannel()) {
+                inChannel.transferTo(0, inChannel.size(), outChannel);
+            }
+
+            DownloadManager dm = (DownloadManager) getSystemService(Context.DOWNLOAD_SERVICE);
+            if (dm != null) {
+                dm.addCompletedDownload(dst.getName(), "GPS Log", true, mimeType, dst.getAbsolutePath(), dst.length(), true);
+            }
+            return true;
+        } catch (IOException e) {
+            return false;
         }
     }
 
