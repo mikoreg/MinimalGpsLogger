@@ -4,14 +4,19 @@ import android.Manifest;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.app.DownloadManager;
+import android.app.PendingIntent;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
+import android.content.BroadcastReceiver;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.ServiceConnection;
 import android.content.pm.PackageManager;
 import android.graphics.Typeface;
+import android.hardware.usb.UsbDevice;
+import android.hardware.usb.UsbManager;
 import android.location.LocationManager;
 import android.net.Uri;
 import android.os.Build;
@@ -62,8 +67,11 @@ import java.util.Set;
 public final class MainActivity extends Activity {
     private static final int REQUEST_ALL = 1000;
     private static final int INITIAL_LOAD_LIMIT = 20;
+    private static final String ACTION_USB_PERMISSION = "com.github.mikoreg.gpslogger.action.USB_PERMISSION";
+    private static final int FLAG_MUTABLE = 0x02000000;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
+    private @Nullable String pendingUsbStartDeviceName;
 
     private @Nullable GpsLoggerService boundService;
     private @Nullable Spinner deviceSpinner;
@@ -115,6 +123,31 @@ public final class MainActivity extends Activity {
         @Override
         public void onServiceDisconnected(ComponentName name) {
             boundService = null;
+        }
+    };
+
+    private final BroadcastReceiver usbPermissionReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            String action = intent.getAction();
+            if (UsbManager.ACTION_USB_DEVICE_ATTACHED.equals(action)
+                    || UsbManager.ACTION_USB_DEVICE_DETACHED.equals(action)) {
+                pendingUsbStartDeviceName = null;
+                refreshBondedDevices();
+                return;
+            }
+            if (ACTION_USB_PERMISSION.equals(action)) {
+                UsbDevice device = intent.getParcelableExtra(UsbManager.EXTRA_DEVICE);
+                boolean granted = intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false);
+                String pendingDeviceName = pendingUsbStartDeviceName;
+                pendingUsbStartDeviceName = null;
+                refreshBondedDevices();
+                if (granted && device != null && device.getDeviceName().equals(pendingDeviceName)) {
+                    startUsbLogging(device);
+                } else {
+                    toast("USB permission denied.");
+                }
+            }
         }
     };
 
@@ -231,6 +264,14 @@ public final class MainActivity extends Activity {
         super.onStart();
         Intent intent = new Intent(this, GpsLoggerService.class);
         bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE);
+        IntentFilter usbFilter = new IntentFilter(ACTION_USB_PERMISSION);
+        usbFilter.addAction(UsbManager.ACTION_USB_DEVICE_ATTACHED);
+        usbFilter.addAction(UsbManager.ACTION_USB_DEVICE_DETACHED);
+        ContextCompat.registerReceiver(
+                this,
+                usbPermissionReceiver,
+                usbFilter,
+                ContextCompat.RECEIVER_NOT_EXPORTED);
         handler.post(uiRefreshRunnable);
         refreshHistory();
     }
@@ -242,6 +283,9 @@ public final class MainActivity extends Activity {
             unbindService(serviceConnection);
             boundService = null;
         }
+        try {
+            unregisterReceiver(usbPermissionReceiver);
+        } catch (IllegalArgumentException ignored) {}
         super.onStop();
     }
 
@@ -294,8 +338,11 @@ public final class MainActivity extends Activity {
         if (deviceAdapter == null) return;
         deviceAdapter.clear();
         
-        deviceAdapter.add(new DeviceListItem("INTERNAL GPS (Built-in Chip)", GpsLoggerService.SOURCE_INTERNAL));
-        deviceAdapter.add(new DeviceListItem("USB GPS (Not supported yet)", "usb"));
+        deviceAdapter.add(new DeviceListItem(
+                "INTERNAL GPS (Built-in Chip)",
+                GpsLoggerService.SOURCE_INTERNAL,
+                GpsLoggerService.SOURCE_INTERNAL));
+        addUsbDevicesToAdapter();
         
         if (hasBluetoothConnectPermission()) {
             BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
@@ -304,12 +351,59 @@ public final class MainActivity extends Activity {
                     Set<BluetoothDevice> bonded = adapter.getBondedDevices();
                     for (BluetoothDevice device : bonded) {
                         String name = device.getName();
-                        deviceAdapter.add(new DeviceListItem("BT: " + (name == null ? "Unknown" : name), device.getAddress()));
+                        deviceAdapter.add(new DeviceListItem(
+                                "BT: " + (name == null ? "Unknown" : name),
+                                device.getAddress(),
+                                GpsLoggerService.SOURCE_BLUETOOTH));
                     }
                 } catch (SecurityException ignored) {}
             }
         }
         deviceAdapter.notifyDataSetChanged();
+    }
+
+    private void addUsbDevicesToAdapter() {
+        UsbManager usbManager = (UsbManager) getSystemService(Context.USB_SERVICE);
+        if (usbManager == null || deviceAdapter == null) {
+            if (deviceAdapter != null) {
+                deviceAdapter.add(new DeviceListItem(
+                        "USB GPS (USB host unavailable)",
+                        "",
+                        GpsLoggerService.SOURCE_USB));
+            }
+            return;
+        }
+        boolean foundUsbDevice = false;
+        for (UsbDevice device : usbManager.getDeviceList().values()) {
+            foundUsbDevice = true;
+            deviceAdapter.add(new DeviceListItem(
+                    "USB: " + describeUsbDevice(device, usbManager.hasPermission(device)),
+                    device.getDeviceName(),
+                    GpsLoggerService.SOURCE_USB));
+        }
+        if (!foundUsbDevice) {
+            deviceAdapter.add(new DeviceListItem(
+                    "USB GPS (not connected)",
+                    "",
+                    GpsLoggerService.SOURCE_USB));
+        }
+    }
+
+    private static String describeUsbDevice(UsbDevice device, boolean hasPermission) {
+        StringBuilder name = new StringBuilder();
+        if (Build.VERSION.SDK_INT >= 21) {
+            String product = device.getProductName();
+            if (product != null && !product.isEmpty()) {
+                name.append(product);
+            }
+        }
+        if (name.length() == 0) {
+            name.append(String.format(Locale.US, "VID:%04X PID:%04X", device.getVendorId(), device.getProductId()));
+        }
+        if (!hasPermission) {
+            name.append(" (permission needed)");
+        }
+        return name.toString();
     }
 
     private @Nullable DeviceListItem getSelectedDevice() {
@@ -324,12 +418,15 @@ public final class MainActivity extends Activity {
             return;
         }
         
-        String sourceType = GpsLoggerService.SOURCE_INTERNAL.equals(selected.address()) 
-                ? GpsLoggerService.SOURCE_INTERNAL 
-                : GpsLoggerService.SOURCE_BLUETOOTH;
-                
-        if ("usb".equals(selected.address())) {
-            toast("USB GPS is not implemented yet.");
+        String sourceType = selected.sourceType();
+
+        if (GpsLoggerService.SOURCE_USB.equals(sourceType)) {
+            if (selected.address().isEmpty()) {
+                toast("USB GPS is not connected.");
+                refreshBondedDevices();
+                return;
+            }
+            startUsbLoggingWithPermission(selected.address());
             return;
         }
 
@@ -373,6 +470,58 @@ public final class MainActivity extends Activity {
         } else {
             startService(intent);
         }
+    }
+
+    private void startUsbLoggingWithPermission(String usbDeviceName) {
+        UsbManager usbManager = (UsbManager) getSystemService(Context.USB_SERVICE);
+        if (usbManager == null) {
+            toast("USB is not available on this device.");
+            return;
+        }
+        UsbDevice device = findUsbDevice(usbManager, usbDeviceName);
+        if (device == null) {
+            toast("USB GPS device is no longer connected.");
+            refreshBondedDevices();
+            return;
+        }
+        if (!usbManager.hasPermission(device)) {
+            pendingUsbStartDeviceName = device.getDeviceName();
+            int flags = PendingIntent.FLAG_UPDATE_CURRENT;
+            if (Build.VERSION.SDK_INT >= 23) {
+                flags |= FLAG_MUTABLE;
+            }
+            PendingIntent permissionIntent = PendingIntent.getBroadcast(
+                    this,
+                    0,
+                    new Intent(ACTION_USB_PERMISSION).setPackage(getPackageName()),
+                    flags);
+            usbManager.requestPermission(device, permissionIntent);
+            toast("Allow USB GPS permission and logging will start.");
+            return;
+        }
+        startUsbLogging(device);
+    }
+
+    private void startUsbLogging(UsbDevice device) {
+        Intent intent = new Intent(this, GpsLoggerService.class);
+        intent.setAction(GpsLoggerService.ACTION_START);
+        intent.putExtra(GpsLoggerService.EXTRA_SOURCE_TYPE, GpsLoggerService.SOURCE_USB);
+        intent.putExtra(GpsLoggerService.EXTRA_DEVICE_ADDRESS, device.getDeviceName());
+        intent.putExtra(GpsLoggerService.EXTRA_DEVICE_NAME, describeUsbDevice(device, true));
+        if (Build.VERSION.SDK_INT >= 26) {
+            startForegroundService(intent);
+        } else {
+            startService(intent);
+        }
+    }
+
+    private static @Nullable UsbDevice findUsbDevice(UsbManager usbManager, String usbDeviceName) {
+        for (UsbDevice device : usbManager.getDeviceList().values()) {
+            if (usbDeviceName.equals(device.getDeviceName())) {
+                return device;
+            }
+        }
+        return null;
     }
 
     private boolean isGpsProviderEnabled() {
@@ -762,9 +911,15 @@ public final class MainActivity extends Activity {
     private static final class DeviceListItem {
         private final String name;
         private final String address;
-        DeviceListItem(String name, String address) { this.name = name; this.address = address; }
+        private final String sourceType;
+        DeviceListItem(String name, String address, String sourceType) {
+            this.name = name;
+            this.address = address;
+            this.sourceType = sourceType;
+        }
         String name() { return name; }
         String address() { return address; }
+        String sourceType() { return sourceType; }
         @Override public String toString() { return name; }
     }
 

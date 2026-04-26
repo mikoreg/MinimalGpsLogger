@@ -30,6 +30,7 @@ public final class GpsLoggerService extends Service {
     public static final String EXTRA_SOURCE_TYPE = "com.github.mikoreg.gpslogger.extra.SOURCE_TYPE";
     public static final String SOURCE_BLUETOOTH = "bluetooth";
     public static final String SOURCE_INTERNAL = "internal";
+    public static final String SOURCE_USB = "usb";
 
     private static final String CHANNEL_ID_LOW = "gps_logger_channel_low";
     private static final String CHANNEL_ID_HIGH = "gps_logger_channel_high";
@@ -65,6 +66,10 @@ public final class GpsLoggerService extends Service {
             String name = intent.getStringExtra(EXTRA_DEVICE_NAME);
             if (SOURCE_BLUETOOTH.equals(sourceType) && (address == null || address.isEmpty())) {
                 stats = NmeaStats.error("Missing Bluetooth MAC address.");
+                return START_NOT_STICKY;
+            }
+            if (SOURCE_USB.equals(sourceType) && (address == null || address.isEmpty())) {
+                stats = NmeaStats.error("Missing USB device name.");
                 return START_NOT_STICKY;
             }
             if (SOURCE_INTERNAL.equals(sourceType) && !hasFineLocationPermission()) {
@@ -127,6 +132,15 @@ public final class GpsLoggerService extends Service {
         StoppableLoggerEngine newEngine;
         if (SOURCE_INTERNAL.equals(sourceType)) {
             newEngine = new InternalNmeaEngine(this, statsSink);
+        } else if (SOURCE_USB.equals(sourceType)) {
+            if (address == null || address.isEmpty()) {
+                stats = NmeaStats.error("Missing USB device name.");
+                stopForegroundCompat();
+                stopSelf();
+                return;
+            }
+            String safeDeviceName = deviceName == null || deviceName.isEmpty() ? address : deviceName;
+            newEngine = new UsbNmeaEngine(this, address, safeDeviceName, statsSink);
         } else {
             BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
             if (adapter == null) {
