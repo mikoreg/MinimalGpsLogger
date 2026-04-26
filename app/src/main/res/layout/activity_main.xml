@@ -13,188 +13,267 @@
         android:text="@string/app_name"
         android:textSize="22sp"
         android:textStyle="bold"
-        android:paddingBottom="12dp"
+        android:paddingBottom="8dp"
         android:gravity="center_horizontal"
         android:textColor="#222222" />
 
-    <!-- STATS AREA -->
-    <LinearLayout
-        android:id="@+id/statsArea"
+    <ScrollView
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:background="#08000000"
-        android:orientation="vertical"
-        android:padding="8dp">
-
-        <TextView
-            android:id="@+id/statusRow"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:textSize="15sp" />
-
-        <TextView
-            android:id="@+id/connFixRow"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:textSize="15sp" />
-
-        <TextView
-            android:id="@+id/posRow"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:fontFamily="monospace"
-            android:textSize="19sp"
-            android:textStyle="bold" />
-
-        <TextView
-            android:id="@+id/detailRow"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:textSize="15sp" />
-
-        <TextView
-            android:id="@+id/debugRow"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:textColor="#555555"
-            android:textSize="13sp" />
-    </LinearLayout>
-
-    <Space
-        android:layout_width="1dp"
-        android:layout_height="12dp" />
-
-    <!-- CONTROLS AREA -->
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal">
-
-        <Button
-            android:id="@+id/startBtn"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1.2"
-            android:background="#2E7D32"
-            android:text="@string/btn_start"
-            android:textColor="#FFFFFF" />
-
-        <View
-            android:layout_width="8dp"
-            android:layout_height="1dp" />
-
-        <Button
-            android:id="@+id/stopBtn"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:background="#C62828"
-            android:text="@string/btn_stop"
-            android:textColor="#FFFFFF" />
-    </LinearLayout>
-
-    <!-- EXPORT OPTIONS AREA (Visible only when logging is stopped) -->
-    <LinearLayout
-        android:id="@+id/exportOptionsContainer"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:paddingTop="12dp"
-        android:visibility="gone">
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:scrollbars="none">
 
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:gravity="center_vertical"
-            android:orientation="horizontal">
+            android:orientation="vertical">
+
+            <!-- STATS AREA -->
+            <LinearLayout
+                android:id="@+id/statsArea"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="#08000000"
+                android:orientation="vertical"
+                android:padding="8dp">
+
+                <TextView
+                    android:id="@+id/statusRow"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:textSize="15sp" />
+
+                <TextView
+                    android:id="@+id/connFixRow"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:textSize="15sp" />
+
+                <TextView
+                    android:id="@+id/posRow"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:fontFamily="monospace"
+                    android:textSize="19sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/detailRow"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:textSize="15sp" />
+
+                <TextView
+                    android:id="@+id/debugRow"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:textColor="#555555"
+                    android:textSize="13sp" />
+            </LinearLayout>
+
+            <Space
+                android:layout_width="1dp"
+                android:layout_height="12dp" />
+
+            <!-- CONTROLS AREA -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+
+                <Button
+                    android:id="@+id/startBtn"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1.2"
+                    android:background="#2E7D32"
+                    android:text="@string/btn_start"
+                    android:textColor="#FFFFFF" />
+
+                <View
+                    android:layout_width="8dp"
+                    android:layout_height="1dp" />
+
+                <Button
+                    android:id="@+id/stopBtn"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:background="#C62828"
+                    android:text="@string/btn_stop"
+                    android:textColor="#FFFFFF" />
+            </LinearLayout>
+
+            <!-- SOURCE SELECTION AREA -->
             <TextView
-                android:layout_width="100dp"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="Export Rate: "
-                android:textSize="12sp" />
-            <Spinner
-                android:id="@+id/rateSpinner"
-                android:layout_width="0dp"
+                android:paddingTop="12dp"
+                android:text="GPS Source:"
+                android:textSize="12sp"
+                android:textColor="#888888" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_weight="1" />
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <Spinner
+                    android:id="@+id/deviceSpinner"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1" />
+
+                <Button
+                    android:id="@+id/refreshBtn"
+                    style="?android:attr/buttonStyleSmall"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/btn_refresh" />
+
+                <Button
+                    android:id="@+id/btSettingsBtn"
+                    style="?android:attr/buttonStyleSmall"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="BT" />
+            </LinearLayout>
+
+            <!-- EXPORT OPTIONS AREA (Visible if files exist) -->
+            <LinearLayout
+                android:id="@+id/exportOptionsContainer"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:paddingTop="8dp"
+                android:visibility="gone">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+                    <TextView
+                        android:layout_width="100dp"
+                        android:layout_height="wrap_content"
+                        android:text="Export Rate: "
+                        android:textSize="12sp" />
+                    <Spinner
+                        android:id="@+id/rateSpinner"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
+                    android:paddingTop="4dp">
+                    <TextView
+                        android:layout_width="100dp"
+                        android:layout_height="wrap_content"
+                        android:text="Min. Distance: "
+                        android:textSize="12sp" />
+                    <Spinner
+                        android:id="@+id/distSpinner"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:paddingTop="4dp">
+                    <Button
+                        android:id="@+id/exportGpxBtn"
+                        style="?android:attr/buttonStyleSmall"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="@string/btn_export_gpx" />
+                    <Button
+                        android:id="@+id/openMapBtn"
+                        style="?android:attr/buttonStyleSmall"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="MAP"
+                        android:visibility="gone" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <!-- HISTORY AREA -->
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:layout_marginTop="16dp"
+                android:background="#DDDDDD" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:paddingTop="8dp">
+                <TextView
+                    android:id="@+id/historyTitle"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/label_select_file_export"
+                    android:textStyle="bold"
+                    android:textSize="14sp"
+                    android:textColor="#666666" />
+                <CheckBox
+                    android:id="@+id/historySelectAll"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/label_select_all"
+                    android:textSize="12sp" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/historyContainer"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical" />
+
+            <Button
+                android:id="@+id/loadMoreBtn"
+                style="?android:attr/borderlessButtonStyle"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Load More..."
+                android:textSize="12sp"
+                android:visibility="gone" />
+
+            <LinearLayout
+                android:id="@+id/historyActions"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:visibility="gone">
+                <Button
+                    android:id="@+id/historyExportBtn"
+                    style="?android:attr/buttonStyleSmall"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="EXPORT SELECTED" />
+                <Button
+                    android:id="@+id/historyDeleteBtn"
+                    style="?android:attr/buttonStyleSmall"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="DEL"
+                    android:textColor="#C62828" />
+            </LinearLayout>
+
         </LinearLayout>
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:gravity="center_vertical"
-            android:orientation="horizontal"
-            android:paddingTop="4dp">
-            <TextView
-                android:layout_width="100dp"
-                android:layout_height="wrap_content"
-                android:text="Min. Distance: "
-                android:textSize="12sp" />
-            <Spinner
-                android:id="@+id/distSpinner"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1" />
-        </LinearLayout>
-
-        <Button
-            android:id="@+id/exportGpxBtn"
-            style="?android:attr/buttonStyleSmall"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:text="@string/btn_export_gpx" />
-    </LinearLayout>
-
-    <!-- SOURCE SELECTION AREA -->
-    <TextView
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:paddingTop="12dp"
-        android:text="GPS Source:"
-        android:textSize="12sp"
-        android:textColor="#888888" />
-
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:gravity="center_vertical"
-        android:orientation="horizontal">
-
-        <Spinner
-            android:id="@+id/deviceSpinner"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1" />
-
-        <Button
-            android:id="@+id/refreshBtn"
-            style="?android:attr/buttonStyleSmall"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="REFRESH" />
-
-        <Button
-            android:id="@+id/btSettingsBtn"
-            style="?android:attr/buttonStyleSmall"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="BT" />
-    </LinearLayout>
-
-    <Button
-        android:id="@+id/openMapBtn"
-        style="?android:attr/buttonStyleSmall"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
-        android:text="@string/btn_view_map"
-        android:visibility="gone" />
-
-    <TextView
-        android:id="@+id/permissionText"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:textSize="11sp" />
+    </ScrollView>
 
 </LinearLayout>
