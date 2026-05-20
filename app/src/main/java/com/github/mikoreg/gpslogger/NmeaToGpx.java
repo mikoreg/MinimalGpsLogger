@@ -28,11 +28,11 @@ final class NmeaToGpx {
      * @return The created .gpx file.
      */
     static File convert(File nmeaFile, long minIntervalMs, float minDistanceMeters) throws Exception {
-        String name = nmeaFile.getName();
-        if (name.endsWith(".nmea")) {
-            name = name.substring(0, name.length() - 5);
+        String baseName = nmeaFile.getName();
+        if (baseName.endsWith(".nmea")) {
+            baseName = baseName.substring(0, baseName.length() - 5);
         }
-        File gpxFile = new File(nmeaFile.getParentFile(), name + ".gpx");
+        File gpxFile = new File(nmeaFile.getParentFile(), baseName + ".gpx");
 
         try (BufferedReader reader = new BufferedReader(new InputStreamReader(new FileInputStream(nmeaFile), StandardCharsets.US_ASCII));
              BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(new FileOutputStream(gpxFile), StandardCharsets.UTF_8))) {
@@ -40,13 +40,13 @@ final class NmeaToGpx {
             writer.write("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
             writer.write("<gpx version=\"1.1\" creator=\"MinimalGpsLogger\" xmlns=\"http://www.topografix.com/GPX/1/1\">\n");
             writer.write("  <trk>\n");
-            writer.write("    <name>Track " + name + "</name>\n");
+            writer.write("    <name>Track " + baseName + "</name>\n");
             writer.write("    <trkseg>\n");
 
             MutableNmeaStats tempStats = new MutableNmeaStats("temp");
             
             // If interval is >= 1s, we use 1s resolution. Otherwise, we include milliseconds.
-            String timePattern = (minIntervalMs >= 1000)
+            String timePattern = (minIntervalMs >= 1000) 
                     ? "yyyy-MM-dd'T'HH:mm:ss'Z'" 
                     : "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'";
             SimpleDateFormat isoFormat = new SimpleDateFormat(timePattern, Locale.US);
@@ -60,20 +60,24 @@ final class NmeaToGpx {
             float[] distanceResult = new float[1];
             List<GpxPoint> buffer = new ArrayList<>();
             long currentSecond = -1;
+            long virtualTsCounter = System.currentTimeMillis();
 
             while ((line = reader.readLine()) != null) {
                 if (!line.startsWith("$")) continue;
                 byte[] bytes = line.getBytes(StandardCharsets.US_ASCII);
                 
-                long now = System.currentTimeMillis();
-                NmeaParser.parseForStats(bytes, bytes.length, tempStats, now);
-                NmeaStats snap = tempStats.snapshot(now);
+                NmeaParser.parseForStats(bytes, bytes.length, tempStats, virtualTsCounter);
+                NmeaStats snap = tempStats.snapshot(virtualTsCounter);
                 
-                boolean isPosSentence = line.contains("GGA") || line.contains("RMC");
+                // GGA, RMC and GLL sentences usually contain position
+                boolean isPosSentence = line.contains("GGA") || line.contains("RMC") || line.contains("GLL");
                 
                 if (isPosSentence && snap.fixValid() && !Double.isNaN(snap.latitude()) && !Double.isNaN(snap.longitude())) {
                     long currentTs = snap.utcTimestampMs();
-                    if (currentTs <= 0) currentTs = now;
+                    if (currentTs <= 0) {
+                        // Monotonic fallback if NMEA has no timestamp
+                        currentTs = virtualTsCounter++;
+                    }
 
                     // 1. Time Filter
                     if (lastWrittenTs != -1 && minIntervalMs > 0) {
@@ -84,7 +88,8 @@ final class NmeaToGpx {
                             // we allow them only if they fit into the requested rate for one second.
                             if ((buffer.size() + 1) * minIntervalMs > 1000) continue;
                         } else {
-                            // Skip out of order points
+                            // Out of order points (rare in files) - we accept them if they are far enough
+                            // or just skip to keep GPX monotonic. Let's skip.
                             continue;
                         }
                     }
@@ -104,8 +109,7 @@ final class NmeaToGpx {
                     
                     currentSecond = second;
                     
-                    // If multiple points in the same second have the same location/elevation,
-                    // we keep only the first one to avoid artificial file bloat.
+                    // Duplicate suppression in the same second
                     boolean identical = false;
                     if (!buffer.isEmpty()) {
                         GpxPoint last = buffer.get(buffer.size() - 1);

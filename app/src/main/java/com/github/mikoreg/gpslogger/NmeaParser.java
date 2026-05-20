@@ -127,7 +127,7 @@ final class NmeaParser {
     }
 
     private static long parseUtcTimestamp(byte[] line, Field timeField, int date) {
-        if (timeField.length() < 6 || date <= 0) return -1;
+        if (timeField.length() < 6) return -1;
         
         int hh = parseInt(new Field(timeField.start, timeField.start + 2), line);
         int mm = parseInt(new Field(timeField.start + 2, timeField.start + 4), line);
@@ -153,9 +153,16 @@ final class NmeaParser {
             }
         }
         
-        int day = date / 10000;
-        int month = (date / 100) % 100;
-        int year = date % 100 + 2000;
+        int day, month, year;
+        if (date > 0) {
+            day = date / 10000;
+            month = (date / 100) % 100;
+            year = date % 100 + 2000;
+        } else {
+            // Fallback to a fixed date if RMC with date hasn't been parsed yet.
+            // GPX requires a full date-time.
+            day = 1; month = 1; year = 2024;
+        }
         
         Calendar cal = Calendar.getInstance(UTC);
         cal.set(Calendar.YEAR, year);

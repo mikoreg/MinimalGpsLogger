@@ -58,4 +58,15 @@ final class NmeaChecksum {
         }
         return -1;
     }
+
+    static String calculate(String sentenceWithoutDollar) {
+        int xor = 0;
+        for (int i = 0; i < sentenceWithoutDollar.length(); i++) {
+            char c = sentenceWithoutDollar.charAt(i);
+            if (c == '*') break;
+            xor ^= c;
+        }
+        String hex = Integer.toHexString(xor).toUpperCase();
+        return hex.length() == 1 ? "0" + hex : hex;
+    }
 }
